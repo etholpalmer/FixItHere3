@@ -1516,6 +1516,35 @@ git add -A && git commit -m "docs: README with run and test instructions"
 
 ---
 
+## Execution profile
+
+- **Implementation model:** Sonnet 5 (`claude-sonnet-5`) — one fresh subagent per task, given only that task's text plus the Global Constraints and Executor Notes sections.
+- **Review model:** Opus 4.8 (`claude-opus-4-8`) — reviews each task's diff after its tests pass, using the fsharp-reviewer/code-reviewer posture: state-machine correctness, F# idiom, envelope/status-code contract, seed determinism. CRITICAL/HIGH findings block the next task.
+- Task subagents must not renegotiate the design; if a step cannot be implemented as written, they stop and report rather than improvise an alternative architecture.
+
+## Executor notes (read before every task — known F# trip hazards)
+
+1. **F# compile order matters.** `.fsproj` `<Compile Include>` order must be: `Domain.fs` → `StateMachine.fs` → `Dtos.fs` (Shared); `Db.fs` → `Seed.fs` → `Services.fs` → `Hub.fs` → `Endpoints.fs` → `DevEndpoints.fs` → `Program.fs` (Backend.Api). Adding a file via `dotnet new` templates does NOT insert it in the right order — edit the fsproj by hand.
+2. **Entry point / WebApplicationFactory.** `Program.fs` uses module-level `do`-bindings as the implicit main; the `type Program() = class end` marker at the bottom is what `WebApplicationFactory<Program>` binds to. Do not add `[<EntryPoint>]` — the minimal-hosting pattern with module-level code is intercepted correctly by `HostFactoryResolver`. If the factory fails to boot, check that `Program.fs` is the LAST compile item.
+3. **CLIMutable records + EF Core.** `[<CLIMutable>]` gives EF the parameterless ctor + setters it needs while keeping record syntax. The pattern `db.Entry(tracked).CurrentValues.SetValues({ tracked with Field = v })` is the sanctioned way to update — never mutate via reflection or add mutable fields.
+4. **Minimal API parameter binding from F# lambdas.** Query/route parameter names are taken from the delegate's parameter names — `Func<AppDb, int, IResult>(fun db jobId -> ...)` binds `?jobId=`. Keep the lambda parameter names exactly as written in each task; renaming them breaks binding silently (400s). If a binding mysteriously fails, switch that endpoint to `[<FromQuery>]`-style explicit binding via `HttpContext` (`ctx.Request.Query.["jobId"]`) rather than restructuring.
+5. **Nullable query params.** `Nullable<int>` / `Nullable<float>` parameters make query params optional. Use `.HasValue` / `.Value`, not pattern matching.
+6. **`Option.ofObj` on EF results.** `SingleOrDefault` returns `null` for missing rows; CLIMutable records are reference types here, so `Option.ofObj` works. Never call `.Single` when absence is a valid case.
+7. **FsCheck version.** Use `FsCheck.Xunit` 2.x (`[<Property>]` attribute as written). If NuGet resolves 3.x and the attribute signature differs, pin `FsCheck.Xunit` to `2.16.6`.
+8. **`task { }` builder** is built into FSharp.Core ≥ 6 — no extra package. Return `Task<IResult>` from async endpoint lambdas exactly as shown.
+9. **JSON casing.** ASP.NET's default `System.Text.Json` options serialize record fields camelCase for web apps created with `WebApplication.CreateBuilder`. The `/dev` console and tests rely on camelCase (`success`, `data`, `businessName`). Do not add custom serializer options.
+10. **SQLite file DB in tests.** Startup reset runs against `fixithere-demo.db` even under `WebApplicationFactory` — this is accepted (each boot reseeds). Tests that need isolation already use in-memory SQLite via `makeDb()` in `DbTests.fs`; reuse it, don't invent a new fixture.
+11. **Don't fix warnings by restructuring.** F# will warn about unused values (e.g. `ignore prov`). Suppress locally (`ignore`) as the plan shows; do not delete plan code to silence warnings.
+
+## Reviewer checklist (Opus 4.8, per task)
+
+- Diff matches the task's Files list — no extra files, no architectural drift.
+- Tests were written first and actually assert behavior (not just "runs without throwing").
+- State-machine invariants: no transition path bypasses `StateMachine.transition`; endpoints never write `Job.State` directly (only `JobService.Apply` / seeder may).
+- Envelope + status codes: every endpoint returns `Envelope`; 409 for invalid transitions, 404 for missing entities, no bare 500 paths.
+- Determinism: no `DateTime.Now`/`UtcNow`, no unseeded `Random`, in seeder or services.
+- Conventional commit made, no AI attribution trailers.
+
 ## Self-review notes
 
 - **Spec coverage (Plan 1 scope):** solution scaffold ✔ (T1), state machine ✔ (T2), DTOs/envelope ✔ (T3), EF/SQLite ✔ (T4), deterministic seed with counts + named personas + 7 services ✔ (T5), JobService + broadcast ✔ (T6), DemoHub + startup reset ✔ (T7), all ~18 endpoints incl. haversine sort, 409-on-invalid, fake JWT ✔ (T8), dev endpoints + Start Demo orchestrator ✔ (T9), /dev console with map/persona/inject/reset ✔ (T10), README ✔ (T11). Mobile apps, simulated GPS UI, fake calls, auto-reply: deferred to Plans 2–3 by design. `Typing`/`Seen` hub events are declared in the contract but only exercised by the apps (Plans 2–3) — the hub sends what services invoke; no dead code added now.
