@@ -8,6 +8,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Backend.Api.Tests/Backend.Api.Tests.fsproj" />
     <Project Path="tests/Customer.Mobile.Tests/Customer.Mobile.Tests.fsproj" />
+    <Project Path="tests/Provider.Mobile.Tests/Provider.Mobile.Tests.fsproj" />
     <Project Path="tests/Shared.Tests/Shared.Tests.fsproj" />
   </Folder>
 </Solution>
