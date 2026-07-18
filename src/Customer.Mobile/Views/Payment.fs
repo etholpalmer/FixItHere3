@@ -12,10 +12,15 @@ let view (model: Model) (jobId: int) =
             ActivityIndicator(true)
             Label("Processing…").centerTextHorizontal()
         | Some r ->
+            let receipt =
+                (VStack(spacing = 4.) {
+                    Label("— Receipt —").centerTextHorizontal()
+                    Label(sprintf "Job #%d" r.JobId).centerTextHorizontal()
+                    Label(sprintf "Status: %s" r.Status).centerTextHorizontal()
+                })
+
             Label("✓ Transferred to Provider").font(size = 28.).centerTextHorizontal()
             Label(sprintf "$%M" r.Amount).font(size = 40.).centerTextHorizontal()
-            Label("— Receipt —").centerTextHorizontal()
-            Label(sprintf "Job #%d" r.JobId).centerTextHorizontal()
-            Label(sprintf "Status: %s" r.Status).centerTextHorizontal()
+            receipt
             Button("Rate your experience", Navigate (Rating jobId))
     }).centerVertical().padding(24.)
