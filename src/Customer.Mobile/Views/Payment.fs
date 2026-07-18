@@ -20,7 +20,7 @@ let view (model: Model) (jobId: int) =
                 })
 
             Label("✓ Transferred to Provider").font(size = 28.).centerTextHorizontal()
-            Label(sprintf "$%M" r.Amount).font(size = 40.).centerTextHorizontal()
+            Label(sprintf "$%.2f" (float r.Amount)).font(size = 40.).centerTextHorizontal()
             receipt
             Button("Rate your experience", Navigate (Rating jobId))
     }).centerVertical().padding(24.)

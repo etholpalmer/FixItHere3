@@ -47,6 +47,10 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             | Chat jobId, _ -> apiCmd (fun () -> deps.GetMessages jobId) MessagesLoaded
             | Payment jobId, _ -> delayCmd 2000 (PaymentDelayDone jobId)
             | _ -> Cmd.none
+        let m =
+            match target with
+            | Payment _ -> { m with PaymentResult = None }
+            | _ -> m
         m, cmd
     | GoBack -> Nav.back model, Cmd.none
     | ServicesLoaded xs -> { model with Services = xs }, Cmd.none
@@ -126,7 +130,8 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | SetUseRealGps true ->
         { model with UseRealGps = true },
         apiCmd deps.GetGpsLocation (fun (la, ln) -> SetLocation (la, ln))
-    | SetUseRealGps false -> { model with UseRealGps = false }, Cmd.none
+    | SetUseRealGps false ->
+        { model with UseRealGps = false; MyLocation = Model.initial.MyLocation }, Cmd.none
     | HubJobUpdated job ->
         let jobs =
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)
@@ -136,6 +141,8 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         match model.Screen with
         | Tracking id when id = job.Id && job.State = "Completed" ->
             Nav.push m (Payment job.Id), delayCmd 2000 (PaymentDelayDone job.Id)
+        | Tracking id when id = job.Id && job.State = "Cancelled" ->
+            Nav.resetTo Home m, Cmd.none
         | _ -> m, Cmd.none
     | HubMessageReceived m2 ->
         let activeJob =

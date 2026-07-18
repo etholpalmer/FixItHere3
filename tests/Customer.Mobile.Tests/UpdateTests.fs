@@ -178,3 +178,27 @@ let ``stars and comment update`` () =
 let ``geo distance Toronto to Mississauga is about 21km`` () =
     let d = Geo.distanceKm (43.6532, -79.3832) (43.5890, -79.6441)
     Assert.InRange(d, 19.0, 24.0)
+
+[<Fact>]
+let ``navigating to Payment clears any stale payment result`` () =
+    let m0 =
+        { Model.initial with
+            Screen = Tracking 7
+            PaymentResult = Some { JobId = 3; Amount = 85m; Status = "Transferred" } }
+    let m = up (Navigate (Payment 7)) m0
+    Assert.Equal(Payment 7, m.Screen)
+    Assert.Equal(None, m.PaymentResult)
+
+[<Fact>]
+let ``cancelled job while tracking navigates to Home`` () =
+    let m0 = { Model.initial with Screen = Tracking 7; Jobs = [mkJob 7 "InProgress"] }
+    let m = up (HubJobUpdated (mkJob 7 "Cancelled")) m0
+    Assert.Equal(Home, m.Screen)
+    Assert.Equal("Cancelled", (m.Jobs |> List.find (fun j -> j.Id = 7)).State)
+
+[<Fact>]
+let ``disabling real GPS resets location to the seed default`` () =
+    let m0 = { Model.initial with UseRealGps = true; MyLocation = (10.0, 20.0) }
+    let m = up (SetUseRealGps false) m0
+    Assert.False(m.UseRealGps)
+    Assert.Equal(Model.initial.MyLocation, m.MyLocation)
