@@ -15,6 +15,18 @@ book → accept → travel → chat → arrive → work → pay → rate flow, l
 Every startup resets the database to identical seed data
 (7 services, 20 customers, 20 providers, 80 jobs, ratings, messages).
 
+## Run the Customer app (Mac Catalyst)
+
+```bash
+dotnet build -t:Run -f net10.0-maccatalyst src/Customer.Mobile
+```
+
+Requires the backend running (above). Log in as John/Mary/Steve/Susan/Bob.
+Use the /dev console as the "provider side" to accept/drive jobs, or press
+Start Demo there for the fully scripted flow.
+
+Android emulator: the app auto-targets http://10.0.2.2:5000.
+
 ## Test
 
 ```bash
