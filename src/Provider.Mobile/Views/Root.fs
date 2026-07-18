@@ -4,14 +4,6 @@ open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Provider
 
-/// Stand-in for screens not yet built (Payment/RateCustomer/DevSettings —
-/// arriving in Task 10). Lets Navigate/back-stack wiring work end-to-end today.
-let private placeholder (label: string) =
-    (VStack(spacing = 12.) {
-        Label(label).font(size = 20.)
-        Button("← Back", GoBack)
-    }).padding(24.)
-
 let private screenView (model: Model) =
     match model.Screen with
     | Splash -> AnyView(Splash.view model)
@@ -20,9 +12,9 @@ let private screenView (model: Model) =
     | JobDetail id -> AnyView(JobDetail.view model id)
     | ActiveJob id -> ActiveJob.view model id
     | Chat id -> AnyView(Chat.view model id)
-    | Payment id -> AnyView(placeholder (sprintf "Payment #%d (coming soon)" id))
-    | RateCustomer id -> AnyView(placeholder (sprintf "Rate Customer #%d (coming soon)" id))
-    | DevSettings -> AnyView(placeholder "Developer Settings (coming soon)")
+    | Payment id -> AnyView(Payment.view model id)
+    | RateCustomer id -> AnyView(RateCustomer.view model id)
+    | DevSettings -> AnyView(DevSettings.view model)
 
 let view (model: Model) =
     Application(
