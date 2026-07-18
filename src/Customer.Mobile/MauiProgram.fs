@@ -6,6 +6,7 @@ open Fabulous.Maui
 open Microsoft.Maui.Devices
 open Microsoft.Maui.Hosting
 open Microsoft.Maui.Media
+open FixItHere.ClientShared
 open FixItHere.Customer
 
 let private pickPhoto () : Task<Result<string, string>> =
@@ -43,7 +44,12 @@ let private updateWithHub (msg: Msg) (model: Model) =
         hubStarted <- true
         let hubCmd =
             Cmd.ofSub (fun dispatch ->
-                Hub.HubClient(Config.baseUrl).Start(dispatch) |> ignore)
+                let hub = FixItHere.ClientShared.Hub.HubClient(Config.baseUrl)
+                hub.Start(
+                    (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
+                    (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
+                    (fun _ -> ()), (fun _ -> ()))   // typing/seen wired in Task 11
+                |> ignore)
         m, Cmd.batch [ cmd; hubCmd ]
     | _ -> m, cmd
 

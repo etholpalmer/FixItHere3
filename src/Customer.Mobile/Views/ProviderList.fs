@@ -2,6 +2,7 @@ module FixItHere.Customer.Views.ProviderList
 
 open Fabulous.Maui
 open type Fabulous.Maui.View
+open FixItHere.ClientShared
 open FixItHere.Customer
 
 let view (model: Model) =

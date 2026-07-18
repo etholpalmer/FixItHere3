@@ -1,10 +1,8 @@
-module FixItHere.Customer.Views.MapHtml
-
-open FixItHere.Customer
+module FixItHere.ClientShared.MapHtml
 
 /// Self-contained Leaflet page: customer pin fixed, provider car marker driven by
 /// the page's own SignalR connection (mirrors the /dev console pattern).
-let render (jobLat: float) (jobLng: float) (providerId: int) : string =
+let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) : string =
     sprintf """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -32,4 +30,4 @@ const conn = new signalR.HubConnectionBuilder().withUrl(baseUrl + "/hub").withAu
 conn.on("LocationUpdated", l => { if (l.providerId === providerId) target = [l.lat, l.lng]; });
 conn.start();
 setTimeout(() => map.invalidateSize(), 400);
-</script></body></html>""" jobLat jobLng providerId Config.baseUrl
+</script></body></html>""" jobLat jobLng providerId baseUrl

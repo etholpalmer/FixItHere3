@@ -2,6 +2,7 @@ module FixItHere.Customer.Tests.UpdateTests
 
 open System.Threading.Tasks
 open Xunit
+open FixItHere.ClientShared
 open FixItHere.Customer
 open FixItHere.Shared.Dtos
 

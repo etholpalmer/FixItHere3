@@ -3,6 +3,7 @@ module FixItHere.Customer.Views.Tracking
 open Microsoft.Maui.Controls
 open Fabulous.Maui
 open type Fabulous.Maui.View
+open FixItHere.ClientShared
 open FixItHere.Customer
 
 let private statusLine (state: string) =
@@ -32,7 +33,7 @@ let view (model: Model) (jobId: int) =
                     Label(sprintf "%s — %s ($%M)" job.ProviderName job.ServiceName job.Price)
                     Label(etaLine)
                 }).gridRow(0)
-                WebView(HtmlWebViewSource(Html = MapHtml.render job.Lat job.Lng job.ProviderId)).gridRow(1)
+                WebView(HtmlWebViewSource(Html = MapHtml.render Config.baseUrl job.Lat job.Lng job.ProviderId)).gridRow(1)
                 (HStack(spacing = 8.) {
                     Button("Call", StartFakeCall)
                     Button("Chat", Navigate (Chat job.Id))
