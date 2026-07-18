@@ -4,9 +4,6 @@ open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Customer
 
-let private placeholder (name: string) =
-    (VStack(spacing = 12.) { Button("← Back", GoBack); Label(name) }).padding(24.)
-
 let private screenView (model: Model) =
     match model.Screen with
     | Splash -> AnyView(Splash.view model)
@@ -18,9 +15,9 @@ let private screenView (model: Model) =
     | Booking (pid, sid) -> AnyView(Booking.view model pid sid)
     | Tracking id -> AnyView(Tracking.view model id)
     | Chat id -> AnyView(Chat.view model id)
-    | Payment _ -> AnyView(placeholder "Payment (Task 9)")
-    | Rating _ -> AnyView(placeholder "Rating (Task 9)")
-    | DevSettings -> AnyView(placeholder "DevSettings (Task 9)")
+    | Payment id -> AnyView(Payment.view model id)
+    | Rating id -> AnyView(Rating.view model id)
+    | DevSettings -> AnyView(DevSettings.view model)
 
 let view (model: Model) =
     Application(
@@ -45,6 +42,12 @@ let view (model: Model) =
                         .verticalOptions(Microsoft.Maui.Controls.LayoutOptions.End)
                         .gestureRecognizers() { TapGestureRecognizer(DismissError) }
                 | None -> ()
+                if model.FakeCallActive then
+                    (VStack(spacing = 16.) {
+                        Label("Calling provider…").font(size = 28.).textColor(Microsoft.Maui.Graphics.Colors.White).centerTextHorizontal()
+                        ActivityIndicator(true)
+                        Button("End Call", EndFakeCall)
+                    }).background(Microsoft.Maui.Graphics.Color.FromRgba(0., 0., 0., 0.85)).centerVertical()
             })
         )
     )
