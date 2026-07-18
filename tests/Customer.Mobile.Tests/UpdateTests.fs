@@ -173,3 +173,8 @@ let ``stars and comment update`` () =
     let m = up (StarsChanged 3) Model.initial
     Assert.Equal(3, m.RatingStars)
     Assert.Equal("great", (up (RatingCommentChanged "great") m).RatingComment)
+
+[<Fact>]
+let ``geo distance Toronto to Mississauga is about 21km`` () =
+    let d = Geo.distanceKm (43.6532, -79.3832) (43.5890, -79.6441)
+    Assert.InRange(d, 19.0, 24.0)

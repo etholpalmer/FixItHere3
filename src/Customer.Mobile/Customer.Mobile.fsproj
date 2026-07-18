@@ -34,12 +34,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Config.fs" />
     <Compile Include="Domain.fs" />
     <Compile Include="Api.fs" />
     <Compile Include="Update.fs" />
     <Compile Include="Location.fs" />
     <Compile Include="Hub.fs" />
-    <Compile Include="App.fs" />
+    <Compile Include="Views/Splash.fs" />
+    <Compile Include="Views/Login.fs" />
+    <Compile Include="Views/Home.fs" />
+    <Compile Include="Views/Catalog.fs" />
+    <Compile Include="Views/ProviderList.fs" />
+    <Compile Include="Views/ProviderProfile.fs" />
+    <Compile Include="Views/Root.fs" />
     <Compile Include="MauiProgram.fs" />
   </ItemGroup>
 
