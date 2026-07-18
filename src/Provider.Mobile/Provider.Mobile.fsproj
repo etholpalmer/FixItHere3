@@ -1,0 +1,113 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-android;net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
+    <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+    <!-- Uncomment to also build the tizen app. You will need to install tizen by following this: https://github.com/Samsung/Tizen.NET -->
+    <!-- <TargetFrameworks>$(TargetFrameworks);net8.0-tizen</TargetFrameworks> -->
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Provider.Mobile</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <DisableImplicitFSharpCoreReference>true</DisableImplicitFSharpCoreReference>
+
+    <!-- Display name -->
+    <ApplicationTitle>Provider.Mobile</ApplicationTitle>
+
+    <!-- App Identifier -->
+    <ApplicationId>com.companyname.Provider.Mobile</ApplicationId>
+    <ApplicationIdGuid>77EECCD3-CD4F-4B74-801B-5587994FBD64</ApplicationIdGuid>
+
+    <!-- Versions -->
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+
+    <TargetPlatformIdentifier Condition=" $(TargetPlatformIdentifier) == '' ">$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)'))</TargetPlatformIdentifier>
+
+    <SupportedOSPlatformVersion Condition="$(TargetPlatformIdentifier) == 'ios'">14.2</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$(TargetPlatformIdentifier) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$(TargetPlatformIdentifier) == 'android'">21.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$(TargetPlatformIdentifier) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion Condition="$(TargetPlatformIdentifier) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+    <SupportedOSPlatformVersion Condition="$(TargetPlatformIdentifier) == 'tizen'">6.5</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Customer.Mobile\ClientShared\Config.fs" />
+    <Compile Include="..\Customer.Mobile\ClientShared\Geo.fs" />
+    <Compile Include="..\Customer.Mobile\ClientShared\Http.fs" />
+    <Compile Include="..\Customer.Mobile\ClientShared\Hub.fs" />
+    <Compile Include="..\Customer.Mobile\ClientShared\MapHtml.fs" />
+    <Compile Include="App.fs" />
+    <Compile Include="MauiProgram.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- App Icon -->
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+
+    <!-- Custom Fonts -->
+    <MauiFont Include="Resources\Fonts\*" />
+
+    <!-- Images -->
+    <MauiImage Include="Resources\Images\*" />
+    <MauiImage Update="Resources\Images\dotnet_bot.svg" BaseSize="168,208" />
+
+    <!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+    <MauiAsset Include="Resources\Raw\*" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+
+    <!-- Splash Screen -->
+    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetPlatformIdentifier) == 'android'">
+    <AndroidResource Include="$(AndroidProjectFolder)Resources/*/*" />
+    <AndroidResource Remove="$(AndroidProjectFolder)Resources/raw/.*" />
+    <AndroidResource Update="$(AndroidProjectFolder)Resources/raw/*" />
+    <AndroidAsset Include="$(AndroidProjectFolder)Assets/**/*" Exclude="$(AndroidProjectFolder)Assets/**/.*/**" />
+    <AndroidManifest Include="$(AndroidProjectFolder)AndroidManifest.xml" />
+    <Compile Include="$(AndroidProjectFolder)MainActivity.fs" />
+    <Compile Include="$(AndroidProjectFolder)MainApplication.fs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetPlatformIdentifier) == 'ios'">
+    <None Include="$(iOSProjectFolder)Info.plist" LogicalName="Info.plist" />
+    <Compile Include="$(iOSProjectFolder)AppDelegate.fs" />
+    <Compile Include="$(iOSProjectFolder)Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetPlatformIdentifier) == 'maccatalyst'">
+    <None Include="$(MacCatalystProjectFolder)Info.plist" LogicalName="Info.plist" />
+    <Compile Include="$(MacCatalystProjectFolder)AppDelegate.fs" />
+    <Compile Include="$(MacCatalystProjectFolder)Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetPlatformIdentifier) == 'windows'">
+    <Manifest Include="$(WindowsProjectFolder)app.manifest" />
+    <AppxManifest Include="$(WindowsProjectFolder)Package.appxmanifest" />
+    <Compile Include="$(WindowsProjectFolder)App.fs" />
+    <Compile Include="$(WindowsProjectFolder)Main.fs" />
+
+    <PackageReference Include="FSharp.Maui.WinUICompat" Version="1.1.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$(TargetPlatformIdentifier) == 'tizen'">
+    <TizenManifestFile Include="$(TizenProjectFolder)tizen-manifest.xml" />
+    <Compile Include="$(TizenProjectFolder)Main.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Fabulous" Version="2.4.0" />
+    <PackageReference Include="Fabulous.MauiControls" Version="8.0.5" />
+    <PackageReference Include="FSharp.Core" Version="10.1.302" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.10" />
+    <PackageReference Include="Microsoft.Maui.Controls" Version="8.0.3" />
+    <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="8.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\Shared.fsproj" />
+  </ItemGroup>
+
+</Project>

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Backend.Api/Backend.Api.fsproj" />
     <Project Path="src/Customer.Mobile/Customer.Mobile.fsproj" />
+    <Project Path="src/Provider.Mobile/Provider.Mobile.fsproj" />
     <Project Path="src/Shared/Shared.fsproj" />
   </Folder>
   <Folder Name="/tests/">
