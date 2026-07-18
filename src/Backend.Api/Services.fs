@@ -11,6 +11,7 @@ type IBroadcaster =
     abstract MessageReceived: MessageDto -> Task
     abstract LocationUpdated: LocationDto -> Task
     abstract Notify: string -> Task
+    abstract ProviderUpdated: ProviderDto -> Task
 
 type NullBroadcaster() =
     interface IBroadcaster with
@@ -18,6 +19,7 @@ type NullBroadcaster() =
         member _.MessageReceived _ = Task.CompletedTask
         member _.LocationUpdated _ = Task.CompletedTask
         member _.Notify _ = Task.CompletedTask
+        member _.ProviderUpdated _ = Task.CompletedTask
 
 let toJobDto (db: AppDb) (j: Job) : JobDto =
     let cust = db.Customers.Single(fun c -> c.Id = j.CustomerId)

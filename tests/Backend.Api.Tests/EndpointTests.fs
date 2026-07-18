@@ -66,3 +66,20 @@ let ``payment simulate returns transferred amount`` () =
     let resp = c.PostAsJsonAsync("/payment/simulate", { JobId = 1 }).Result
     let env = resp.Content.ReadFromJsonAsync<Envelope<PaymentResult>>().Result
     Assert.Equal("Transferred", env.Data.Status)
+
+[<Fact>]
+let ``provider online toggle flips and returns dto`` () =
+    use c = client ()
+    let resp = c.PutAsJsonAsync("/providers/1/online", {| online = false |}).Result
+    let env = resp.Content.ReadFromJsonAsync<Envelope<ProviderDto>>().Result
+    Assert.True(env.Success)
+    Assert.False(env.Data.Online)
+    // and it persists:
+    let env2 = c.GetFromJsonAsync<Envelope<ProviderDto>>("/providers/1").Result
+    Assert.False(env2.Data.Online)
+
+[<Fact>]
+let ``provider online toggle 404s on unknown id`` () =
+    use c = client ()
+    let resp = c.PutAsJsonAsync("/providers/9999/online", {| online = true |}).Result
+    Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode)

@@ -9,6 +9,9 @@ open FixItHere.Shared.Dtos
 open FixItHere.Backend.Db
 open FixItHere.Backend.Services
 
+[<CLIMutable>]
+type SetOnlineRequest = { Online: bool }
+
 let private okJson (data: 't) = Results.Json(Envelope.ok data)
 let private err (status: int) (msg: string) =
     Results.Json(Envelope.fail msg, statusCode = status)
@@ -73,6 +76,19 @@ let mapAll (app: WebApplication) =
         match db.Providers.SingleOrDefault(fun p -> p.Id = id) |> Option.ofObj with
         | Some p -> okJson (toProviderDto db p)
         | None -> err 404 (sprintf "Provider %d not found" id))) |> ignore
+
+    app.MapPut("/providers/{id}/online",
+        Func<int, SetOnlineRequest, AppDb, IBroadcaster, System.Threading.Tasks.Task<IResult>>(
+            fun id req db hub -> task {
+                match db.Providers.SingleOrDefault(fun p -> p.Id = id) |> Option.ofObj with
+                | None -> return err 404 (sprintf "Provider %d not found" id)
+                | Some prov ->
+                    let updated = { prov with Online = req.Online }
+                    db.Entry(prov).CurrentValues.SetValues(updated)
+                    db.SaveChanges() |> ignore
+                    let dto = toProviderDto db updated
+                    do! hub.ProviderUpdated dto
+                    return okJson dto })) |> ignore
 
     app.MapPost("/jobs", Func<CreateJobRequest, JobService, System.Threading.Tasks.Task<IResult>>(
         fun req svc -> task {
