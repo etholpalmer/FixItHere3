@@ -63,6 +63,7 @@ type Msg =
     | FinishWork of jobId: int
     | JobActioned of JobDto
     | GpsTick of jobId: int
+    | GpsFetched of jobId: int * lat: float * lng: float
     | LocationPushed of LocationDto
     | SliderMoved of pct: float
     | MessagesLoaded of MessageDto list
@@ -130,6 +131,14 @@ module Domain =
     /// The single job currently being worked (spec: one Active Job at a time).
     let activeJob (m: Model) : JobDto option =
         m.Jobs |> List.tryFind (fun j -> List.contains j.State inFlight)
+
+    /// True when an incoming hub chat message should trigger a canned auto-reply:
+    /// auto-reply is enabled, the message isn't my own, and the sender is the
+    /// customer on one of my jobs.
+    let shouldAutoReply (me: int option) (m: Model) (msg: MessageDto) : bool =
+        me <> Some msg.SenderId
+        && m.AutoReply
+        && m.Jobs |> List.exists (fun j -> j.Id = msg.JobId && j.CustomerId = msg.SenderId)
 
 module Slider =
     /// Linear interpolation from start toward target; pct clamped to [0, 1].

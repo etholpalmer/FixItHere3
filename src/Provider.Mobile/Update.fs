@@ -71,15 +71,20 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | GpsTick jobId ->
         // stream own position while the job is EnRoute and Real GPS is on
         match activeJob model, model.Session with
-        | Some j, Some s when j.Id = jobId && j.State = "EnRoute" && model.UseRealGps ->
+        | Some j, Some _ when j.Id = jobId && j.State = "EnRoute" && model.UseRealGps ->
             model,
             Cmd.batch
-                [ apiCmd deps.GetGpsLocation (fun (la, ln) -> SetLocation (la, ln))
-                  apiCmd (fun () ->
-                      let la, ln = model.MyLocation
-                      deps.UpdateLocation s.UserId la ln) LocationPushed
+                [ apiCmd deps.GetGpsLocation (fun (la, ln) -> GpsFetched (jobId, la, ln))
                   delayCmd 3000 (GpsTick jobId) ]
         | _ -> model, Cmd.none
+    | GpsFetched (_, la, ln) ->
+        // apply the freshly-fetched reading and push that SAME reading to the server
+        // (compute once, use twice — avoids pushing a stale model.MyLocation)
+        match model.Session with
+        | Some s ->
+            { model with MyLocation = (la, ln) },
+            apiCmd (fun () -> deps.UpdateLocation s.UserId la ln) LocationPushed
+        | None -> { model with MyLocation = (la, ln) }, Cmd.none
     | LocationPushed loc -> { model with MyLocation = (loc.Lat, loc.Lng) }, Cmd.none
     | SliderMoved pct ->
         match activeJob model, model.Session with
@@ -188,8 +193,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
                   Cmd.ofSub (fun _ -> deps.SendSeen m2.JobId s.UserId)
               | _ -> Cmd.none
               // auto-reply to the customer's message on one of my jobs
-              if model.AutoReply && not isMine
-                 && model.Jobs |> List.exists (fun j -> j.Id = m2.JobId && j.CustomerId = m2.SenderId) then
+              if shouldAutoReply me model m2 then
                   delayCmd 5000 (AutoReplyDue m2.JobId)
               else Cmd.none ]
         m, Cmd.batch cmds

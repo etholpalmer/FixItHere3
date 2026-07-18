@@ -99,21 +99,39 @@ let ``slider move sets slider start once and keeps it`` () =
     Assert.Equal(Some (43.0, -79.0), m2.SliderStart)   // start captured once
 
 [<Fact>]
-let ``auto reply schedules only for customer message on my job when enabled`` () =
+let ``auto reply due increments counter and cycles canned replies in order`` () =
+    // NOTE: this exercises the AutoReplyDue handler directly, NOT the scheduling
+    // guard in HubMessageReceived — `up` discards the returned Cmd<Msg>, so a Cmd
+    // scheduled via delayCmd is never actually executed here. The guard itself is
+    // covered separately by the `shouldAutoReply` predicate tests below.
     let m0 = loggedIn { Model.initial with AutoReply = true; Jobs = [mkJob 7 "EnRoute"] }
-    // customer message (senderId 1 = job customer) -> reply scheduled (cmd non-empty is hard to
-    // assert portably; assert the counter increments when AutoReplyDue fires instead)
     let m1 = up (AutoReplyDue 7) m0
     Assert.Equal(1, m1.AutoRepliesSent)
+    let m2 = up (AutoReplyDue 7) m1
+    Assert.Equal(2, m2.AutoRepliesSent)
+    let m3 = up (AutoReplyDue 7) m2
+    Assert.Equal(3, m3.AutoRepliesSent)
 
 [<Fact>]
-let ``own hub-echoed message appends once and never schedules auto reply`` () =
+let ``shouldAutoReply guards on autoReply flag, own-message, and job ownership`` () =
+    // Real regression coverage for the HubMessageReceived auto-reply guard: this
+    // calls the extracted pure predicate directly (no Cmd execution required),
+    // unlike a test that merely discards the Cmd and checks unrelated state.
+    let model = { Model.initial with AutoReply = true; Jobs = [mkJob 7 "EnRoute"] }
+    let customerMsg = mkChatMsg 10 7 1   // senderId 1 = job customer
+    Assert.True(shouldAutoReply (Some 4) model customerMsg)
+    Assert.False(shouldAutoReply (Some 4) model (mkChatMsg 11 7 4))                 // own message
+    Assert.False(shouldAutoReply (Some 4) { model with AutoReply = false } customerMsg) // disabled
+    Assert.False(shouldAutoReply (Some 4) model (mkChatMsg 12 99 1))                // not my job
+
+[<Fact>]
+let ``own hub-echoed message appends once without duplicating`` () =
     let m0 = loggedIn { Model.initial with AutoReply = true; Screen = Chat 7; Jobs = [mkJob 7 "EnRoute"] }
     let m1 = up (HubMessageReceived (mkChatMsg 10 7 4)) m0   // senderId 4 = me
     Assert.Equal(1, m1.Messages |> List.filter (fun x -> x.Id = 10) |> List.length)
     let m2 = up (HubMessageReceived (mkChatMsg 10 7 4)) m1   // duplicate echo
     Assert.Equal(1, m2.Messages |> List.filter (fun x -> x.Id = 10) |> List.length)
-    Assert.Equal(0, m2.AutoRepliesSent)
+    Assert.False(shouldAutoReply (Some 4) m0 (mkChatMsg 10 7 4))   // own message never qualifies
 
 [<Fact>]
 let ``typing cooldown blocks resend until done`` () =
