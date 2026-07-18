@@ -27,6 +27,22 @@ Start Demo there for the fully scripted flow.
 
 Android emulator: the app auto-targets http://10.0.2.2:5000.
 
+## Run the Provider app (Mac Catalyst)
+
+```bash
+dotnet build -t:Run -f net10.0-maccatalyst src/Provider.Mobile
+```
+
+Requires the backend running (above). Log in as one of:
+- **Mike's Plumbing** (password: Provider1!)
+- **Joe Electric** (password: Provider1!)
+- **Rapid Tire Repair** (password: Provider1!)
+- **Elite HVAC** (password: Provider1!)
+
+From **DevSettings**, press **Start Demo** to watch the fully scripted two-app flow
+(booking, acceptance, travel, chat, work completion, payment, rating).
+Customer app also has a **Start Demo** button in DevSettings.
+
 ## Test
 
 ```bash
