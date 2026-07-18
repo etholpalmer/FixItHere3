@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Backend.Api/Backend.Api.fsproj" />
     <Project Path="src/Shared/Shared.fsproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Backend.Api.Tests/Backend.Api.Tests.fsproj" />
     <Project Path="tests/Shared.Tests/Shared.Tests.fsproj" />
   </Folder>
 </Solution>

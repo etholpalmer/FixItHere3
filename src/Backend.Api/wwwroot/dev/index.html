@@ -1,0 +1,159 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>FixItHere Demo Control Panel</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; display: grid;
+         grid-template-columns: 340px 1fr 320px; height: 100vh; }
+  .col { padding: 12px; overflow-y: auto; border-right: 1px solid #ddd; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  h2 { font-size: 13px; text-transform: uppercase; color: #666; margin: 16px 0 6px; }
+  button { margin: 2px; padding: 4px 10px; cursor: pointer; }
+  #map { height: 100%; }
+  .job { border: 1px solid #ccc; border-radius: 6px; padding: 6px; margin: 4px 0; font-size: 12px; }
+  .job b { font-size: 13px; }
+  #log { font-size: 11px; font-family: monospace; white-space: pre-wrap; }
+  .big { font-size: 15px; padding: 8px 14px; font-weight: 600; }
+  select, input { margin: 2px; padding: 4px; }
+</style>
+</head>
+<body>
+<div class="col">
+  <h1>FixItHere Demo Control Panel</h1>
+  <button class="big" onclick="startDemo()">&#9654; Start Demo</button>
+  <button class="big" onclick="resetDemo()">&#8635; Reset Demo</button>
+  <h2>Personas</h2>
+  Customer <select id="customer"></select><br>
+  Provider <select id="provider"></select>
+  <h2>Create Job</h2>
+  <button onclick="createJob()">Create job (customer &rarr; provider)</button>
+  <h2>Inject Message</h2>
+  <input id="msgJobId" placeholder="job id" size="6">
+  <input id="msgText" placeholder="text" size="18">
+  <button onclick="injectMsg(true)">as Customer</button>
+  <button onclick="injectMsg(false)">as Provider</button>
+  <h2>Payment</h2>
+  <input id="payJobId" placeholder="job id" size="6">
+  <button onclick="simulatePayment()">Force Payment</button>
+  <h2>Jobs (non-terminal)</h2>
+  <div id="jobs"></div>
+</div>
+<div id="map"></div>
+<div class="col">
+  <h2>Live Events</h2>
+  <div id="log"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
+<script>
+const api = async (method, path, body) => {
+  const resp = await fetch(path, {
+    method, headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined });
+  const env = await resp.json();
+  if (!env.success) log(`ERR ${path}: ${env.error}`);
+  return env.data;
+};
+const log = (msg) => {
+  const el = document.getElementById("log");
+  el.textContent = new Date().toLocaleTimeString() + "  " + msg + "\n" + el.textContent;
+};
+
+// --- map ---
+const map = L.map("map").setView([43.7, -79.45], 10);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+  { attribution: "&copy; OpenStreetMap" }).addTo(map);
+const providerMarkers = {};
+map.on("click", async (e) => {
+  const pid = parseInt(document.getElementById("provider").value);
+  await api("PUT", "/location", { providerId: pid, lat: e.latlng.lat, lng: e.latlng.lng });
+  log(`Moved provider ${pid} to ${e.latlng.lat.toFixed(4)},${e.latlng.lng.toFixed(4)}`);
+});
+
+// --- data loading ---
+async function refresh() {
+  const provs = await api("GET", "/providers");
+  const provSel = document.getElementById("provider");
+  provSel.innerHTML = provs.map(p =>
+    `<option value="${p.id}">${p.businessName} (${p.serviceName})</option>`).join("");
+  provs.forEach(p => {
+    if (!providerMarkers[p.id])
+      providerMarkers[p.id] = L.marker([p.lat, p.lng]).addTo(map)
+        .bindPopup(p.businessName);
+    else providerMarkers[p.id].setLatLng([p.lat, p.lng]);
+  });
+  // fake-login list uses seeded customers; named five are guaranteed present
+  const custSel = document.getElementById("customer");
+  custSel.innerHTML = "";
+  for (const name of ["John","Mary","Steve","Susan","Bob"]) {
+    const u = await api("POST", "/login", { role: "Customer", name });
+    if (u) custSel.innerHTML += `<option value="${u.userId}">${u.displayName}</option>`;
+  }
+  await refreshJobs();
+}
+async function refreshJobs() {
+  const jobs = await api("GET", "/jobs");
+  const active = jobs.filter(j => !["Closed","Cancelled"].includes(j.state));
+  document.getElementById("jobs").innerHTML = active.map(j => `
+    <div class="job"><b>#${j.id}</b> ${j.customerName} &rarr; ${j.providerName}
+      [${j.serviceName}] <b>${j.state}</b> $${j.price}<br>
+      ${["accept","enroute","arrive","start","complete","cancel"].map(t =>
+        `<button onclick="transition(${j.id},'${t}')">${t}</button>`).join("")}
+    </div>`).join("");
+}
+
+// --- actions ---
+async function transition(id, t) {
+  await api("PUT", `/jobs/${id}/${t}`);
+  await refreshJobs();
+}
+async function createJob() {
+  const customerId = parseInt(document.getElementById("customer").value);
+  const providerId = parseInt(document.getElementById("provider").value);
+  const provs = await api("GET", "/providers");
+  const p = provs.find(x => x.id === providerId);
+  await api("POST", "/jobs", { customerId, providerId, serviceId: p.serviceId,
+    scheduleChoice: "Now", lat: 43.65, lng: -79.38, address: "1 Demo St" });
+  await refreshJobs();
+}
+async function injectMsg(asCustomer) {
+  const jobId = parseInt(document.getElementById("msgJobId").value);
+  const job = await api("GET", `/jobs/${jobId}`);
+  await api("POST", "/messages", { jobId,
+    senderId: asCustomer ? job.customerId : job.providerId,
+    text: document.getElementById("msgText").value, photoBase64: null });
+}
+async function simulatePayment() {
+  const jobId = parseInt(document.getElementById("payJobId").value);
+  const r = await api("POST", "/payment/simulate", { jobId });
+  if (r) log(`Payment: $${r.amount} ${r.status}`);
+}
+async function startDemo() {
+  const customerId = parseInt(document.getElementById("customer").value);
+  const providerId = parseInt(document.getElementById("provider").value);
+  const job = await api("POST", "/dev/demo/start", { customerId, providerId });
+  if (job) log(`Demo started with job #${job.id}`);
+}
+async function resetDemo() {
+  await api("POST", "/dev/reset");
+  log("Demo reset");
+  await refresh();
+}
+
+// --- realtime ---
+const conn = new signalR.HubConnectionBuilder().withUrl("/hub").build();
+conn.on("JobUpdated", j => { log(`Job #${j.id} -> ${j.state}`); refreshJobs(); });
+conn.on("MessageReceived", m => log(`Msg [job ${m.jobId}] ${m.senderName}: ${m.text}`));
+conn.on("LocationUpdated", l => {
+  log(`Provider ${l.providerId} @ ${l.lat.toFixed(4)},${l.lng.toFixed(4)}`);
+  if (providerMarkers[l.providerId]) providerMarkers[l.providerId].setLatLng([l.lat, l.lng]);
+});
+conn.on("Notification", t => log(`[notify] ${t}`));
+conn.start().then(() => log("SignalR connected"));
+
+refresh();
+</script>
+</body>
+</html>
