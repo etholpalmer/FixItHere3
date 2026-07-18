@@ -75,7 +75,16 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | CancelActiveJob jobId ->
         model, apiCmd (fun () -> deps.CancelJob jobId) HubJobUpdated
     | MessagesLoaded xs -> { model with Messages = xs }, Cmd.none
-    | ChatDraftChanged t -> { model with ChatDraft = t }, Cmd.none
+    | ChatDraftChanged t ->
+        let m = { model with ChatDraft = t }
+        match model.Screen, model.Session with
+        | Chat jobId, Some s when not model.TypingCooldown ->
+            { m with TypingCooldown = true },
+            Cmd.batch
+                [ Cmd.ofSub (fun _ -> deps.SendTyping jobId s.UserId)
+                  delayCmd 2000 TypingCooldownDone ]
+        | _ -> m, Cmd.none
+    | TypingCooldownDone -> { model with TypingCooldown = false }, Cmd.none
     | StarsChanged n -> { model with RatingStars = n }, Cmd.none
     | RatingCommentChanged t -> { model with RatingComment = t }, Cmd.none
     | SendChatMessage (jobId, text, photo) ->
@@ -132,6 +141,13 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         apiCmd deps.GetGpsLocation (fun (la, ln) -> SetLocation (la, ln))
     | SetUseRealGps false ->
         { model with UseRealGps = false; MyLocation = Model.initial.MyLocation }, Cmd.none
+    | StartDemo ->
+        match model.Session with
+        | None -> model, Cmd.ofMsg (ApiError "Not logged in")
+        | Some s ->
+            match model.Providers |> List.tryFind (fun p -> p.Online) |> Option.orElse (model.Providers |> List.tryHead) with
+            | Some provider -> model, apiCmd (fun () -> deps.StartDemo s.UserId provider.Id) JobCreated
+            | None -> model, Cmd.ofMsg (ApiError "No providers available")
     | HubJobUpdated job ->
         let jobs =
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)
@@ -145,15 +161,35 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             Nav.resetTo Home m, Cmd.none
         | _ -> m, Cmd.none
     | HubMessageReceived m2 ->
+        let me = model.Session |> Option.map (fun s -> s.UserId)
+        let isMine = me = Some m2.SenderId
         let activeJob =
             match model.Screen with
             | Chat id | Tracking id -> Some id
             | _ -> None
-        if activeJob = Some m2.JobId
-           && not (model.Messages |> List.exists (fun x -> x.Id = m2.Id))
-        then { model with Messages = model.Messages @ [m2] }, Cmd.none
-        else model, Cmd.none
+        let append =
+            activeJob = Some m2.JobId
+            && not (model.Messages |> List.exists (fun x -> x.Id = m2.Id))
+        let m = if append then { model with Messages = model.Messages @ [m2] } else model
+        let cmd =
+            // mark seen if I'm looking at this chat and it's not my own message
+            match model.Screen, model.Session with
+            | Chat id, Some s when id = m2.JobId && not isMine ->
+                Cmd.ofSub (fun _ -> deps.SendSeen m2.JobId s.UserId)
+            | _ -> Cmd.none
+        m, cmd
     | HubLocationUpdated loc ->
         { model with ProviderPositions = model.ProviderPositions.Add(loc.ProviderId, (loc.Lat, loc.Lng)) },
         Cmd.none
     | HubNotification text -> { model with Toast = Some text }, Cmd.none
+    | HubTyping (jobId, senderId) ->
+        match model.Screen, model.Session with
+        | Chat id, Some s when id = jobId && senderId <> s.UserId ->
+            { model with ProviderTyping = true }, delayCmd 3000 TypingExpired
+        | _ -> model, Cmd.none
+    | HubSeen (jobId, senderId) ->
+        match model.Screen, model.Session with
+        | Chat id, Some s when id = jobId && senderId <> s.UserId ->
+            { model with MessagesSeen = true }, Cmd.none
+        | _ -> model, Cmd.none
+    | TypingExpired -> { model with ProviderTyping = false }, Cmd.none

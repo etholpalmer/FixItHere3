@@ -44,8 +44,11 @@ let stubDeps : ApiDeps =
       SendMessage = fun _ -> Task.FromResult(Error "unused")
       SimulatePayment = fun _ -> Task.FromResult(Error "unused")
       SubmitRating = fun _ -> Task.FromResult(Error "unused")
+      StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
-      GetGpsLocation = fun () -> Task.FromResult(Ok (43.65, -79.38)) }
+      GetGpsLocation = fun () -> Task.FromResult(Ok (43.65, -79.38))
+      SendTyping = fun _ _ -> ()
+      SendSeen = fun _ _ -> () }
 
 let mkJob id state : JobDto =
     { Id = id; CustomerId = 1; CustomerName = "John"; ProviderId = 2; ProviderName = "Mike's Plumbing"
@@ -203,3 +206,33 @@ let ``disabling real GPS resets location to the seed default`` () =
     let m = up (SetUseRealGps false) m0
     Assert.False(m.UseRealGps)
     Assert.Equal(Model.initial.MyLocation, m.MyLocation)
+
+[<Fact>]
+let ``typing cooldown blocks resend until done`` () =
+    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let m0 = { Model.initial with Screen = Chat 7; Session = session }
+    let m1 = up (ChatDraftChanged "h") m0
+    Assert.True(m1.TypingCooldown)
+    let m2 = up TypingCooldownDone m1
+    Assert.False(m2.TypingCooldown)
+
+[<Fact>]
+let ``hub typing shows indicator for open chat only`` () =
+    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let m0 = { Model.initial with Screen = Chat 7; Session = session }
+    Assert.True((up (HubTyping (7, 2)) m0).ProviderTyping)
+    Assert.False((up (HubTyping (99, 2)) m0).ProviderTyping)
+    Assert.False((up TypingExpired (up (HubTyping (7, 2)) m0)).ProviderTyping)
+
+[<Fact>]
+let ``hub seen marks messages seen`` () =
+    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let m0 = { Model.initial with Screen = Chat 7; Session = session }
+    Assert.True((up (HubSeen (7, 2)) m0).MessagesSeen)
+
+[<Fact>]
+let ``start demo errors when not logged in`` () =
+    let _, cmd = Update.update stubDeps StartDemo Model.initial
+    let mutable dispatched = []
+    for sub in cmd do sub (fun m -> dispatched <- m :: dispatched)
+    Assert.Contains(ApiError "Not logged in", dispatched)

@@ -30,13 +30,22 @@ let private gpsLocation () : Task<Result<float * float, string>> =
         return Ok loc
     }
 
-let private deps =
+/// Single HubClient instance shared two ways: its SendTyping/SendSeen methods are
+/// injected into ApiDeps below (Update.fs calls them on chat-draft/message-seen),
+/// and its Start(...) method is invoked once on first LoggedIn further down. Config.baseUrl
+/// must be finalized (Android emulator override) before this is constructed, since HubClient
+/// captures the base URL at construction time.
+let private hub =
     if DeviceInfo.Platform = DevicePlatform.Android then Config.baseUrl <- "http://10.0.2.2:5000"
-    Api.createDepsWith pickPhoto gpsLocation (new System.Net.Http.HttpClientHandler()) Config.baseUrl
+    FixItHere.ClientShared.Hub.HubClient(Config.baseUrl)
+
+let private deps =
+    Api.createDepsWith pickPhoto gpsLocation hub.SendTyping hub.SendSeen (new System.Net.Http.HttpClientHandler()) Config.baseUrl
 
 let mutable private hubStarted = false
 
-/// Wraps Update.update: first successful login also starts the SignalR hub.
+/// Wraps Update.update: first successful login also starts the SignalR hub (the same
+/// HubClient instance whose SendTyping/SendSeen already feed `deps` above).
 let private updateWithHub (msg: Msg) (model: Model) =
     let m, cmd = Update.update deps msg model
     match msg with
@@ -44,11 +53,10 @@ let private updateWithHub (msg: Msg) (model: Model) =
         hubStarted <- true
         let hubCmd =
             Cmd.ofSub (fun dispatch ->
-                let hub = FixItHere.ClientShared.Hub.HubClient(Config.baseUrl)
                 hub.Start(
                     (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
                     (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
-                    (fun _ -> ()), (fun _ -> ()))   // typing/seen wired in Task 11
+                    (fun (j, s) -> dispatch (HubTyping (j, s))), (fun (j, s) -> dispatch (HubSeen (j, s))))
                 |> ignore)
         m, Cmd.batch [ cmd; hubCmd ]
     | _ -> m, cmd

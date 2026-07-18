@@ -18,4 +18,5 @@ let view (model: Model) =
         Label("Teleport to:").font(size = 18.)
         for (name, pos) in cities do
             Button(name, SetLocation pos)
+        Button("▶ Start Demo", StartDemo)
     }).padding(24.)

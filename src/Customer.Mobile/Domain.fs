@@ -34,6 +34,9 @@ type Model =
       PaymentResult: PaymentResult option
       FakeCallActive: bool
       ChatDraft: string
+      ProviderTyping: bool
+      MessagesSeen: bool
+      TypingCooldown: bool
       RatingStars: int
       RatingComment: string
       Toast: string option
@@ -47,7 +50,8 @@ module Model =
           Services = []; Providers = []; ProfileRatings = []
           Jobs = []; Messages = []; ProviderPositions = Map.empty
           PaymentResult = None; FakeCallActive = false
-          ChatDraft = ""; RatingStars = 5; RatingComment = ""
+          ChatDraft = ""; ProviderTyping = false; MessagesSeen = false; TypingCooldown = false
+          RatingStars = 5; RatingComment = ""
           Toast = None; Error = None }
 
 type Msg =
@@ -82,6 +86,11 @@ type Msg =
     | HubMessageReceived of MessageDto
     | HubLocationUpdated of LocationDto
     | HubNotification of string
+    | HubTyping of jobId: int * senderId: int
+    | HubSeen of jobId: int * senderId: int
+    | TypingExpired
+    | TypingCooldownDone
+    | StartDemo
     | DismissToast
     | DismissError
     | ApiError of string
@@ -98,9 +107,12 @@ type ApiDeps =
       SendMessage: SendMessageRequest -> Task<Result<MessageDto, string>>
       SimulatePayment: int -> Task<Result<PaymentResult, string>>
       SubmitRating: CreateRatingRequest -> Task<Result<RatingDto, string>>
+      StartDemo: int -> int -> Task<Result<JobDto, string>>   // customerId, providerId
       // MAUI-implemented effects, injected like the HTTP calls so update stays pure:
       PickPhoto: unit -> Task<Result<string, string>>          // base64 jpeg/png ≤ ~100KB
-      GetGpsLocation: unit -> Task<Result<float * float, string>> }
+      GetGpsLocation: unit -> Task<Result<float * float, string>>
+      SendTyping: int -> int -> unit
+      SendSeen: int -> int -> unit }
 
 module Nav =
     let push (m: Model) (s: Screen) = { m with Screen = s; History = m.Screen :: m.History }

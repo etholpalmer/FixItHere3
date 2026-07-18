@@ -10,6 +10,8 @@ open FixItHere.ClientShared
 let createDepsWith
     (pickPhoto: unit -> Task<Result<string, string>>)
     (gpsLocation: unit -> Task<Result<float * float, string>>)
+    (sendTyping: int -> int -> unit)
+    (sendSeen: int -> int -> unit)
     (handler: HttpMessageHandler)
     (baseUrl: string) : ApiDeps =
     let http = new HttpClient(handler, BaseAddress = Uri(baseUrl))
@@ -25,5 +27,9 @@ let createDepsWith
       SendMessage = fun req -> Http.postEnv http "/messages" req
       SimulatePayment = fun jobId -> Http.postEnv http "/payment/simulate" { JobId = jobId }
       SubmitRating = fun req -> Http.postEnv http "/ratings" req
+      StartDemo = fun customerId providerId ->
+          Http.postEnv http "/dev/demo/start" {| customerId = customerId; providerId = providerId |}
       PickPhoto = pickPhoto
-      GetGpsLocation = gpsLocation }
+      GetGpsLocation = gpsLocation
+      SendTyping = sendTyping
+      SendSeen = sendSeen }
