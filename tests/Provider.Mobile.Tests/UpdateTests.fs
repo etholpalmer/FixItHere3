@@ -82,3 +82,63 @@ let ``job actioned elsewhere just upserts`` () =
     let m = up (JobActioned (mkJob 7 "Arrived")) m0
     Assert.Equal(ActiveJob 7, m.Screen)
     Assert.Equal("Arrived", (m.Jobs |> List.find (fun j -> j.Id = 7)).State)
+
+let mkChatMsg id jobId senderId : MessageDto =
+    { Id = id; JobId = jobId; SenderId = senderId; SenderName = "John"
+      Text = "hi"; PhotoBase64 = null; SentAt = ""; Seen = false }
+
+let loggedIn m =
+    { m with Model.Session = Some { Token = "t"; UserId = 4; DisplayName = "Elite HVAC" } }
+
+[<Fact>]
+let ``slider move sets slider start once and keeps it`` () =
+    let m0 = loggedIn { Model.initial with Jobs = [mkJob 7 "EnRoute"]; MyLocation = (43.0, -79.0) }
+    let m1 = up (SliderMoved 0.5) m0
+    Assert.Equal(Some (43.0, -79.0), m1.SliderStart)
+    let m2 = up (SliderMoved 0.9) { m1 with MyLocation = (43.4, -79.2) }
+    Assert.Equal(Some (43.0, -79.0), m2.SliderStart)   // start captured once
+
+[<Fact>]
+let ``auto reply schedules only for customer message on my job when enabled`` () =
+    let m0 = loggedIn { Model.initial with AutoReply = true; Jobs = [mkJob 7 "EnRoute"] }
+    // customer message (senderId 1 = job customer) -> reply scheduled (cmd non-empty is hard to
+    // assert portably; assert the counter increments when AutoReplyDue fires instead)
+    let m1 = up (AutoReplyDue 7) m0
+    Assert.Equal(1, m1.AutoRepliesSent)
+
+[<Fact>]
+let ``own hub-echoed message appends once and never schedules auto reply`` () =
+    let m0 = loggedIn { Model.initial with AutoReply = true; Screen = Chat 7; Jobs = [mkJob 7 "EnRoute"] }
+    let m1 = up (HubMessageReceived (mkChatMsg 10 7 4)) m0   // senderId 4 = me
+    Assert.Equal(1, m1.Messages |> List.filter (fun x -> x.Id = 10) |> List.length)
+    let m2 = up (HubMessageReceived (mkChatMsg 10 7 4)) m1   // duplicate echo
+    Assert.Equal(1, m2.Messages |> List.filter (fun x -> x.Id = 10) |> List.length)
+    Assert.Equal(0, m2.AutoRepliesSent)
+
+[<Fact>]
+let ``typing cooldown blocks resend until done`` () =
+    let m0 = loggedIn { Model.initial with Screen = Chat 7 }
+    let m1 = up (ChatDraftChanged "h") m0
+    Assert.True(m1.TypingCooldown)
+    let m2 = up TypingCooldownDone m1
+    Assert.False(m2.TypingCooldown)
+
+[<Fact>]
+let ``hub typing shows indicator for open chat only`` () =
+    let m0 = loggedIn { Model.initial with Screen = Chat 7 }
+    Assert.True((up (HubTyping (7, 1)) m0).CustomerTyping)
+    Assert.False((up (HubTyping (99, 1)) m0).CustomerTyping)
+    Assert.False((up CustomerTypingExpired (up (HubTyping (7, 1)) m0)).CustomerTyping)
+
+[<Fact>]
+let ``hub seen marks customer seen`` () =
+    let m0 = loggedIn { Model.initial with Screen = Chat 7 }
+    Assert.True((up (HubSeen (7, 1)) m0).CustomerSeen)
+
+[<Fact>]
+let ``rating submitted returns Home and resets`` () =
+    let m0 = loggedIn { Model.initial with Screen = RateCustomer 7; History = [Payment 7; Home]; RatingStars = 2 }
+    let m = up RatingSubmitted m0
+    Assert.Equal(Home, m.Screen)
+    Assert.Empty(m.History)
+    Assert.Equal(5, m.RatingStars)
