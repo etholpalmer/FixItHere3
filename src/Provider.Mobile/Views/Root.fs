@@ -4,8 +4,8 @@ open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Provider
 
-/// Stand-in for screens not yet built (ActiveJob/Chat/Payment/RateCustomer/DevSettings —
-/// arriving in Tasks 9-10). Lets Navigate/back-stack wiring work end-to-end today.
+/// Stand-in for screens not yet built (Payment/RateCustomer/DevSettings —
+/// arriving in Task 10). Lets Navigate/back-stack wiring work end-to-end today.
 let private placeholder (label: string) =
     (VStack(spacing = 12.) {
         Label(label).font(size = 20.)
@@ -18,8 +18,8 @@ let private screenView (model: Model) =
     | Login -> AnyView(Login.view model)
     | Home -> AnyView(Home.view model)
     | JobDetail id -> AnyView(JobDetail.view model id)
-    | ActiveJob id -> AnyView(placeholder (sprintf "Active Job #%d (coming soon)" id))
-    | Chat id -> AnyView(placeholder (sprintf "Chat #%d (coming soon)" id))
+    | ActiveJob id -> ActiveJob.view model id
+    | Chat id -> AnyView(Chat.view model id)
     | Payment id -> AnyView(placeholder (sprintf "Payment #%d (coming soon)" id))
     | RateCustomer id -> AnyView(placeholder (sprintf "Rate Customer #%d (coming soon)" id))
     | DevSettings -> AnyView(placeholder "Developer Settings (coming soon)")
