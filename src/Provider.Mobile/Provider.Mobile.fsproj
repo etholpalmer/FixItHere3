@@ -39,6 +39,7 @@
     <Compile Include="..\Customer.Mobile\ClientShared\Http.fs" />
     <Compile Include="..\Customer.Mobile\ClientShared\Hub.fs" />
     <Compile Include="..\Customer.Mobile\ClientShared\MapHtml.fs" />
+    <Compile Include="Domain.fs" />
     <Compile Include="App.fs" />
     <Compile Include="MauiProgram.fs" />
   </ItemGroup>
