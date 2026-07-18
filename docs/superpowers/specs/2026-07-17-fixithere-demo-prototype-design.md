@@ -65,11 +65,11 @@ scheduled → enRoute → arrived → inProgress → completed → closed
 ### Data & seeding
 - EF Core + SQLite.
 - **Every startup: drop → recreate → deterministic reseed.** Fixed data, no time-based randomness — every run is byte-identical.
-- Seed contents: 20 customers, 20 providers (distributed across the 6 catalog services), 50 `completed`/`closed` jobs, 30 pending jobs, ratings, messages, seeded placeholder photos.
+- Seed contents: 20 customers, 20 providers (distributed across the 7 catalog services), 50 `completed`/`closed` jobs, 30 pending jobs, ratings, messages, seeded placeholder photos.
 - Named fake-login accounts are a curated subset of the seed:
   - Customers: John, Mary, Steve, Susan, Bob
   - Providers: Mike's Plumbing, Joe Electric, Rapid Tire Repair, Elite HVAC
-  - The seeder reconciles named providers to the 6 catalog services (Plumbing, Electrical, Painting, Mechanic, Moving, Cleaning); Elite HVAC is mapped to the nearest catalog category so the catalog stays at 6 sections.
+  - Catalog services (7): Plumbing, Electrical, Painting, Mechanic, Moving, Cleaning, **HVAC** (HVAC added so Elite HVAC has a native category).
 
 ### Services (application layer)
 - `JobService` — applies the `Shared` state machine, persists, broadcasts.
@@ -108,7 +108,7 @@ Dev-only (Development environment): `POST /dev/reset`, `POST /dev/seed`, `POST /
 Shared per-app services: `ApiClient` (typed `HttpClient` over `Shared` DTOs), `RealtimeClient` (SignalR), `LocationProvider` (real vs simulated), `LocalPhotoStore` (camera/gallery, ≤5 photos, never uploaded to storage).
 
 ### Customer.Mobile flow
-Splash → choose role → pick customer → Login → Home → Service Catalog (Plumbing, Electrical, Painting, Mechanic, Moving, Cleaning) → nearby providers (sorted by haversine proximity) → provider profile → **Book** (fake schedule: Now / 30 min / Tomorrow / Saturday) → live tracking → chat → provider arrives → work starts → complete → fake payment receipt → rating.
+Splash → choose role → pick customer → Login → Home → Service Catalog (Plumbing, Electrical, Painting, Mechanic, Moving, Cleaning, HVAC) → nearby providers (sorted by haversine proximity) → provider profile → **Book** (fake schedule: Now / 30 min / Tomorrow / Saturday) → live tracking → chat → provider arrives → work starts → complete → fake payment receipt → rating.
 
 ### Provider.Mobile flow
 Splash → pick provider → **Online/Offline** switch (jobs appear when Online) → available jobs → accept → navigate → chat → arrived → start → complete → fake payment.
