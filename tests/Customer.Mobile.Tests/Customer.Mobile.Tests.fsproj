@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Customer.Mobile\Domain.fs" />
+    <Compile Include="..\..\src\Customer.Mobile\Api.fs" Condition="Exists('..\..\src\Customer.Mobile\Api.fs')" />
+    <Compile Include="..\..\src\Customer.Mobile\Update.fs" Condition="Exists('..\..\src\Customer.Mobile\Update.fs')" />
+    <Compile Include="UpdateTests.fs" />
+    <Compile Include="ApiTests.fs" Condition="Exists('ApiTests.fs')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Fabulous" Version="2.4.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Shared\Shared.fsproj" />
+  </ItemGroup>
+
+</Project>
