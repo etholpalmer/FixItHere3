@@ -40,12 +40,16 @@
     <Compile Include="Update.fs" />
     <Compile Include="Location.fs" />
     <Compile Include="Hub.fs" />
+    <Compile Include="Views/MapHtml.fs" />
     <Compile Include="Views/Splash.fs" />
     <Compile Include="Views/Login.fs" />
     <Compile Include="Views/Home.fs" />
     <Compile Include="Views/Catalog.fs" />
     <Compile Include="Views/ProviderList.fs" />
     <Compile Include="Views/ProviderProfile.fs" />
+    <Compile Include="Views/Booking.fs" />
+    <Compile Include="Views/Tracking.fs" />
+    <Compile Include="Views/Chat.fs" />
     <Compile Include="Views/Root.fs" />
     <Compile Include="MauiProgram.fs" />
   </ItemGroup>
