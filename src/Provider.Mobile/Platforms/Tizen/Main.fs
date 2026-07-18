@@ -3,11 +3,12 @@ namespace Provider.Mobile
 open System
 open Microsoft.Maui
 open Microsoft.Maui.Hosting
+open FixItHere.Provider
 
 type Program() =
     inherit MauiApplication()
 
-    override this.CreateMauiApp() = MauiProgram.CreateMauiApp()
+    override this.CreateMauiApp() = MauiProgram.createMauiApp ()
 
 module Program =
     [<EntryPoint>]
