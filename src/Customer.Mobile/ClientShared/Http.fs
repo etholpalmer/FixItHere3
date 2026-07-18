@@ -40,3 +40,11 @@ let putEnv<'t> (http: HttpClient) (path: string) : Task<Result<'t, string>> =
             return! readEnv<'t> resp
         with ex -> return Error ex.Message
     }
+
+let putBodyEnv<'req, 't> (http: HttpClient) (path: string) (body: 'req) : Task<Result<'t, string>> =
+    task {
+        try
+            let! resp = http.PutAsJsonAsync(path, body, jsonOpts)
+            return! readEnv<'t> resp
+        with ex -> return Error ex.Message
+    }
