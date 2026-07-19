@@ -36,7 +36,7 @@ let private gpsLocation () : Task<Result<float * float, string>> =
 /// must be finalized (Android emulator override) before this is constructed, since HubClient
 /// captures the base URL at construction time.
 let private hub =
-    if DeviceInfo.Platform = DevicePlatform.Android then Config.baseUrl <- "http://10.0.2.2:5000"
+    if DeviceInfo.Platform = DevicePlatform.Android then Config.baseUrl <- "http://10.0.2.2:5162"
     FixItHere.ClientShared.Hub.HubClient(Config.baseUrl)
 
 let private deps =

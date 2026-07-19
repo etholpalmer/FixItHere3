@@ -9,7 +9,7 @@ See [`docs/superpowers/specs/2026-07-17-fixithere-demo-prototype-design.md`](doc
 dotnet run --project src/Backend.Api
 ```
 
-Then open <http://localhost:5000/dev> — press **Start Demo** to watch the full
+Then open <http://localhost:5162/dev> — press **Start Demo** to watch the full
 book → accept → travel → chat → arrive → work → pay → rate flow, live on the map.
 
 Every startup resets the database to identical seed data
@@ -25,7 +25,7 @@ Requires the backend running (above). Log in as John/Mary/Steve/Susan/Bob.
 Use the /dev console as the "provider side" to accept/drive jobs, or press
 Start Demo there for the fully scripted flow.
 
-Android emulator: the app auto-targets http://10.0.2.2:5000.
+Android emulator: the app auto-targets http://10.0.2.2:5162.
 
 ## Run the Provider app (Mac Catalyst)
 
@@ -58,7 +58,12 @@ dotnet test
 ## Notes
 
 - **.NET 10** SDK (the design doc says net8.0; net10 is what the toolchain here provides — same code).
-- Backend listens on `http://localhost:5000` by default. `WebApplication.CreateBuilder()`
-  does not read CLI `--urls`; set `ASPNETCORE_URLS` to change the port.
+- Backend listens on `http://localhost:5162` — set by `applicationUrl` in
+  `src/Backend.Api/Properties/launchSettings.json`, which `dotnet run` applies and which
+  takes precedence over `ASPNETCORE_URLS`. To override the port you must edit that file
+  or run with `--no-launch-profile` plus `ASPNETCORE_URLS`.
+- **Do not use port 5000 on macOS.** It is occupied by the AirPlay Receiver
+  (ControlCenter), which answers with HTTP 403 — requests never reach the API. The
+  mobile apps' `Config.baseUrl` therefore targets 5162 to match the backend.
 - Dev endpoints (`/dev`, `/dev/reset`, `/dev/demo/start`) are mapped in the
   **Development** environment only.
