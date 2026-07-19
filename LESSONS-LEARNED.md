@@ -8,8 +8,8 @@
 - **OS:** macOS (Darwin 25.5.0)
 - **Tooling:** Claude Code CLI (agentic session), no traditional IDE
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
-- **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite
-- **Last Updated:** 2026-07-18
+- **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
+- **Last Updated:** 2026-07-18 (Plan 3 / Provider.Mobile)
 
 ---
 
@@ -133,6 +133,34 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 **Impact:** Added `[<assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)>]` in a dedicated `AssemblyInfo.fs`, compiled first. Generalizes to any test suite where multiple integration-test classes share one mutable on-disk fixture (file DB, single log file, shared port): disable parallelization at the assembly level rather than hoping test ordering happens to avoid the race.
 
 **Related:** none
+
+---
+
+### 2026-07-18 — Rebuilding both Debug and Release for `net10.0-maccatalyst` across many verification cycles exhausts local disk without warning, and disk-full breaks the agent's own tool execution before it breaks the build
+
+**Insight:** Mac Catalyst builds carry heavy native-codegen intermediate artifacts (AOT/linker prep), and Release is dramatically larger than Debug for the same TFM: measured on this repo, `Provider.Mobile` alone is 102M (`obj/Debug/net10.0-maccatalyst`) + 794M (`obj/Release/net10.0-maccatalyst`) + 213M (`bin/Debug`) + 252M (`bin/Release`) ≈ 1.36GB; `Customer.Mobile` is ≈ 1.75GB by the same breakdown. The other declared TFMs (`net10.0-android`, `net10.0-ios`) sat at 0B–140K — they were never actually built, only restored — so the bloat is entirely a Debug+Release×maccatalyst effect, not a multi-TFM effect. Across Plan 3's ~12 tasks, each ending in a "build + test" checkpoint, this repeated Catalyst rebuild pattern (plus a 5.2GB `~/.nuget/packages` cache) ran the host's already-thin free-disk headroom down to zero.
+
+**Discovery:** `df` showed free space collapsing (179Mi observed at one point) then hitting 0, at which point **Bash tool calls themselves started failing** — not the `dotnet build`/`dotnet test` commands under them, but the tool harness's own mechanism for capturing command output, which needs to write a small temp file. This is a distinctive failure mode worth recognizing on sight: when a Bash call errors with no command-specific error text (nothing about the command that was supposedly run), suspect disk exhaustion in the sandbox before suspecting the command or the harness.
+
+**Impact:** For any MAUI (or similarly native-AOT-heavy) project built repeatedly across many task/verification cycles in one long agentic session, disk headroom should be checked periodically (`df -h /`), not assumed. A single stuck agent turn can otherwise escalate from "build is slow" to "no tool in this session can execute" with very little warning, and recovery requires the user to free space out-of-band since the agent's own tools are what's blocked.
+
+**Active mitigation:** None automated yet. A cheap one: run `dotnet clean` (or delete `bin/`+`obj/` for the mobile apps) at natural task/phase boundaries rather than only at the very end, and/or build only the configuration actually needed for manual verification (`-c Debug`) instead of letting both configurations accumulate. See the related Gap for what a real fix looks like.
+
+**Related:** [Gap: no disk-headroom check before/during long MAUI build-heavy sessions](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
+
+---
+
+### 2026-07-18 — MVU test helpers that discard the returned `Cmd<Msg>` silently hide untested guard logic
+
+**Insight:** Both `Provider.Mobile.Tests` and `Customer.Mobile.Tests` define `let up msg model = Update.update stubDeps msg model |> fst` — a convenience helper that keeps the model half of `update`'s `(Model * Cmd<Msg>)` return and throws the `Cmd<Msg>` away. Any test written purely against `up` can only ever assert on model-field changes; it cannot detect whether the code *decided* to schedule a command (an auto-reply, a hub call, a demo-start request) unless that decision also mutates the model directly. A guard that's expressed purely as "should I emit this Cmd or not" is invisible to `up`-only tests even when the test's name claims to cover it.
+
+**Discovery:** In Provider.Mobile, the auto-reply regression tests all went through `up`, so they exercised `AutoReplyDue`'s counter/cycling behavior and message de-duplication, but never actually exercised the `isMine`/`AutoReply`/job-ownership guard inside `HubMessageReceived` that decides *whether* to schedule an auto-reply Cmd in the first place — despite the tests' names implying that coverage. Caught only because a later reviewer pass in this branch actually traced what `up` discards.
+
+**Impact:** The fix generalizes: any guard whose entire job is "emit this Cmd or don't" needs either (a) a pure predicate extracted out of the `update` arm and unit-tested directly (what was done here — `shouldAutoReply` was pulled into `Domain.fs`), or (b) a test that calls `Update.update` directly and drains the returned `Cmd<Msg>` by invoking each `Sub` with a capturing dispatch function (`Customer.Mobile.Tests`' `` `start demo errors when not logged in` `` test does this correctly). Prefer (a) when the guard logic is nontrivial enough to name — it's independently reusable and the test reads as documentation of the rule, not just its symptom.
+
+**Active mitigation:** None automated. A `grep -rn "|> fst" tests/**/UpdateTests.fs` skim before trusting any test suite's coverage claims for Cmd-driven behavior is the manual equivalent for now.
+
+**Related:** [Mistake: auto-reply guard was never actually exercised by its own regression tests](#2026-07-18--auto-reply-guard-was-never-actually-exercised-by-its-own-regression-tests)
 
 ---
 
@@ -260,22 +288,101 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 
 ---
 
+### 2026-07-18 — `GpsTick` pushed a one-tick-stale location to the server
+
+**Symptom:** No user-visible error or test failure — caught by code inspection during Provider.Mobile Task 7 (real-GPS streaming while EnRoute). The server-visible provider location always lagged the device's actual GPS reading by one 3-second tick.
+
+**Attempted:** N/A — this wasn't chased from a failing assertion; it was found by reading `GpsTick`'s handler against the model-update lifecycle and noticing the push used `model.MyLocation` (the value already in the model *before* this tick's fetch) rather than the value the tick had just fetched.
+
+**Root Cause:** `GpsTick`'s handler read a fresh GPS coordinate and updated `model.MyLocation` with it, but the same handler's server-push Cmd was built from `model` — the pre-update model captured in the `update` function's argument — not from the freshly-fetched value. In an MVU update function, everything derived from `model` inside one arm sees the *old* model; a fetched value that needs to both update the model AND be pushed in the same step must flow through as an explicit value, not be re-read from a `model` binding after conceptually "updating" it.
+
+**Fix:** Split into two messages: `GpsTick` performs the fetch and dispatches a new `GpsFetched(jobId, lat, lng)` message; `GpsFetched`'s handler both sets `model.MyLocation` and builds the push-to-server Cmd from the same `lat`/`lng` arguments in one step, so there's no window where "the value in the model" and "the value that gets pushed" can diverge. See [`src/Provider.Mobile/Update.fs`](src/Provider.Mobile/Update.fs).
+
+**Prevention:** In any MVU `update` arm that both (a) receives or fetches a new value and (b) needs to push/use that same value elsewhere in the same logical step, thread the value through function arguments/a follow-up message — never reconstruct it by reading back from `model` later in the same or a subsequent arm, since `model` there is the pre-update snapshot.
+
+**Time Lost:** Not tracked precisely (found via inspection, not a debugging session) — low, given it was resolved in the same commit as the discovery.
+
+**Severity:** Medium — silent, one-tick location lag wouldn't crash anything but would make the customer-side tracking car visibly lag behind the provider's real position, undermining the demo's core "live GPS tracking" feature.
+
+**Related:** none
+
+---
+
+### 2026-07-18 — Auto-reply guard was never actually exercised by its own regression tests
+
+**Symptom:** No failure — the two existing auto-reply tests passed. The gap was that they passed for reasons unrelated to what their names implied.
+
+**Attempted:** N/A — found by tracing what the shared `up` test helper (`Update.update stubDeps msg model |> fst`) actually exercises versus what the test names claimed to cover.
+
+**Root Cause:** `up` discards the `Cmd<Msg>` half of `update`'s return value. The `isMine`/`AutoReply`/job-ownership guard inside `HubMessageReceived` that decides whether to *schedule* an auto-reply lives entirely in the Cmd it returns — nothing about that decision touches the model directly — so no `up`-based test could ever observe whether the guard fired correctly or not.
+
+**Fix:** Extracted the guard into a pure `shouldAutoReply` predicate in [`src/Provider.Mobile/Domain.fs`](src/Provider.Mobile/Domain.fs) that `HubMessageReceived` now calls, and added a test that exercises `shouldAutoReply` directly (no Cmd-draining needed since it's a pure function). Renamed the two pre-existing tests to describe what they actually assert (`AutoReplyDue`'s counter/cycling behavior, and message de-duplication) instead of implying Cmd-scheduling coverage they never had.
+
+**Prevention:** See [Lesson: MVU test helpers that discard Cmd<Msg> hide untested guard logic](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic) — extract Cmd-gating guards into pure predicates and test those directly, rather than relying on a model-only test helper to somehow surface them.
+
+**Time Lost:** Bundled into the same commit as the GpsTick fix; not separately tracked.
+
+**Severity:** Medium — not a live bug (the guard's actual logic was correct), but a false sense of test coverage that could have let a real regression in the guard ship undetected.
+
+**Related:** [Lesson: MVU test helpers that discard the returned Cmd<Msg> silently hide untested guard logic](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic)
+
+---
+
 ## Solution Gaps
 
-### 2026-07-18 — MAUI workload not installed; Customer.Mobile (Plan 2) cannot build yet
+### 2026-07-18 — No disk-headroom check before/during long MAUI build-heavy agentic sessions
 
-**Current State:** `dotnet workload list` reports zero installed workloads in this environment. Xcode is present (`/Applications/Xcode.app`), so iOS/Mac Catalyst codesigning tooling exists, but the MAUI SDK workload itself (`maui`, `maui-android`, `maui-ios`, `maui-maccatalyst`) has not been installed.
+**Current State:** Nothing in this session's tooling checked `df` before or during a long run of `dotnet build`/`dotnet test` cycles against two MAUI apps. Debug+Release Mac Catalyst builds for both apps together reached ≈3.1GB of `bin`/`obj`, and combined with a pre-existing 5.2GB `~/.nuget/packages` cache, this ran the host's free disk to zero mid-session, which in turn broke the Bash tool's own output-capture mechanism (see [Lesson: rebuilding Debug+Release for maccatalyst exhausts disk](#2026-07-18--rebuilding-both-debug-and-release-for-net100-maccatalyst-across-many-verification-cycles-exhausts-local-disk-without-warning-and-disk-full-breaks-the-agents-own-tool-execution-before-it-breaks-the-build)).
 
-**Limitation:** The Customer.Mobile (Plan 2) design spec's `net10.0-android` / `net10.0-ios` / `net10.0-maccatalyst` target frameworks cannot resolve or build until the workload is installed. The spec already documents a fallback (drop to the latest available mobile TFMs if net10 manifests are unavailable), but that hasn't been exercised yet.
+**Limitation:** There's no early warning between "build succeeded" and "the agent's tools stop working entirely" — disk exhaustion isn't surfaced as a build error or test failure, it silently degrades free space until the whole session's tool execution breaks with error text that doesn't mention disk at all.
 
-**Recommended Improvement:** Run `dotnet workload install maui` as literally the first task of the Plan 2 implementation plan, then verify `net10.0-maccatalyst` resolves before writing any Fabulous code — fail fast on tooling before investing in application code.
+**Recommended Improvement:** A lightweight check at natural checkpoints (e.g., after every few tasks in a long implementation plan, or via a Stop/PostToolUse hook) that runs `df -h /` and warns/fails loudly below some threshold (e.g., 2GB free), before the condition becomes unrecoverable from inside the session.
 
 **Closing this gap requires:**
-1. `dotnet workload install maui` (and confirm it succeeds under whatever network/sandbox constraints apply) — pending
-2. Verify `dotnet build -f net10.0-maccatalyst` succeeds against an empty scaffold before Task 2 of the Plan 2 implementation plan begins — pending
-3. If net10 manifests are unavailable, retarget `Customer.Mobile` to the latest resolvable mobile TFM (net9/net8) while keeping `Shared`/`Backend.Api` on net10.0 — fallback plan already written into the design spec, not yet needed
+1. A small shell one-liner (`df` parse + threshold check) wired as a PostToolUse hook after `Bash` calls matching `dotnet build`/`dotnet test`, or as a periodic Stop-hook check — a couple of hours — pending
+2. A documented cleanup step (`dotnet clean` for the mobile apps, or scoping builds to `-c Debug` only during iterative task work) added to this project's MAUI-specific executor notes so future implementation plans budget for it explicitly — pending
+3. Optionally, prune `~/.nuget/packages` on a schedule independent of this repo, since it's a machine-wide cache that isn't specific to this project — pending, outside this repo's control
 
-**Priority:** High — this blocks all of Plan 2 (Customer.Mobile) from starting.
+**Active mitigation:** None yet — the fastest interim step is simply running `df -h /` manually before kicking off a build-heavy task batch in this project.
+
+**Priority:** Medium — didn't block correctness of any shipped code, but did block the agent's own ability to finish verifying Task 12 within this session (see the related Compromise/Gap on Task 12's incomplete final verification).
+
+**Related:** [Lesson: rebuilding Debug+Release for maccatalyst exhausts disk](#2026-07-18--rebuilding-both-debug-and-release-for-net100-maccatalyst-across-many-verification-cycles-exhausts-local-disk-without-warning-and-disk-full-breaks-the-agents-own-tool-execution-before-it-breaks-the-build), [Gap: Task 12's manual acceptance walk and final review were not completed before disk exhaustion](#2026-07-18--task-12s-two-app-manual-acceptance-walk-and-final-per-task-review-were-not-completed-before-disk-exhaustion-interrupted-the-session)
+
+---
+
+### 2026-07-18 — Task 12's two-app manual acceptance walk and final per-task review were not completed before disk exhaustion interrupted the session
+
+**Current State:** Commit `cec1e7c` ("docs: Provider.Mobile run instructions; prototype acceptance complete") landed with all 78 automated tests passing and both mobile apps building cleanly for `net10.0-maccatalyst`. However, per this project's standing execution/review split (Sonnet 5 implements, Opus 4.8 reviews each task's diff — see the plan's "Execution profile"/"Reviewer checklist" sections in [docs/superpowers/plans/2026-07-18-provider-mobile.md](docs/superpowers/plans/2026-07-18-provider-mobile.md)), the final task's Opus review had not yet been dispatched, and the plan's Task 12 Step 2 (a manual two-app-side-by-side click-through: online toggle, accept, live GPS tracking, chat typing/seen, auto-reply, fake payment, ratings, both apps' in-app Start Demo buttons, `/dev` Reset Demo) had not been independently re-driven interactively in this session — the disk-exhaustion incident interrupted verification before either step ran.
+
+**Limitation:** There is also no tool in this environment analogous to Playwright for web apps that can drive a running native Mac Catalyst window — a MAUI/Fabulous UI can't currently be click-tested by the agent itself the way a browser-rendered page can via the Browser pane tools. Even absent the disk incident, Task 12 Step 2 would have needed either the user to drive it manually or a native UI-automation tool this project doesn't have wired up.
+
+**Recommended Improvement:** Now that disk headroom is restored (~5.2GB free as of this writing), dispatch the deferred Opus review pass over the Task 12 diff, and explicitly ask the user to perform (or confirm they already performed) the two-app manual walkthrough from the plan's Step 2 — don't infer it happened just because the commit message says "acceptance complete."
+
+**Closing this gap requires:**
+1. Dispatch the Opus 4.8 review pass for the final task's diff per the standing execution-profile — pending
+2. Get explicit user confirmation of the two-app manual acceptance walk (Step 2 of Task 12), or perform it together interactively — pending
+3. Longer-term: evaluate whether any native macOS UI-automation tool (e.g., XCUITest driven headlessly, or `cliclick`/AppleScript against the built `.app`) could give the agent a Playwright-equivalent for MAUI/Mac Catalyst windows — not started, speculative
+
+**Priority:** High — this is the last open item before the branch can be considered genuinely done, not just committed.
+
+**Related:** [Gap: no disk-headroom check before/during long MAUI build-heavy agentic sessions](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
+
+---
+
+### 2026-07-18 — Typing/Seen hub relay has no automated test; verified manually only
+
+**Current State:** The SignalR `Typing`/`Seen` hub relay (provider ↔ customer typing indicator and read-receipt) added in Provider.Mobile Tasks 7/9 and mirrored into Customer.Mobile Task 11 has no automated backend hub test — `grep` across `tests/Backend.Api.Tests` for `Typing`/`Seen` returns nothing. The plan's own self-review notes call this out explicitly: "hub relay (Typing/Seen) is manually verified (no automated hub-method test) — accepted for the demo, noted in the spec's testing posture."
+
+**Limitation:** A regression in the hub relay (e.g., a typo in the SignalR method/group name, or a broken de-dup/throttle on the client) would not be caught by `dotnet test` — only by a human manually watching both apps' chat screens simultaneously.
+
+**Recommended Improvement:** Add a `Microsoft.AspNetCore.SignalR.Client.TestHost`-based (or in-memory hub context) test that connects two fake clients to the hub and asserts a `Typing`/`Seen` message sent by one is relayed to the other for the same job, mirroring the pattern already used for the REST endpoints in `WebApplicationFactory`.
+
+**Closing this gap requires:**
+1. Stand up an in-process SignalR test harness (two `HubConnection`s against the `WebApplicationFactory`'s `TestServer`) — roughly half a day given no existing precedent in this repo for hub-level testing — pending
+2. Write the actual relay-assertion tests for `Typing` and `Seen` — an hour once the harness exists — pending
+
+**Priority:** Low for the prototype's current scope (explicitly accepted in the plan's self-review), but the first thing to add if this project graduates past demo status.
 
 **Related:** [Compromise: net10.0 instead of the plan's net8.0](#2026-07-18--targeted-net100-instead-of-the-designed-net80)
 
@@ -285,7 +392,7 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 
 **Current State:** `DevEndpoints.mapAll`'s `/dev/demo/start` handler calls `runTimeline sp dto.Id |> ignore` — a genuinely fire-and-forget `Task`. If any step in the ~20-second scripted timeline throws (e.g., a job was manually transitioned out of band by someone clicking `/dev` console buttons mid-script, making a later `svc.Apply` call return `Error` unexpectedly, or an unhandled exception), the exception is silently swallowed; the HTTP response for `/dev/demo/start` has already returned 200 with the created job.
 
-**Limitation:** A demo presenter clicking "Start Demo" then also fumbling with manual transition buttons on the same job could silently desync the timeline with no visible error — the UI would just stop updating with no explanation.
+**Limitation:** A demo presenter clicking "Start Demo" then also fumbling with manual transition buttons on the same job could silently desync the timeline with no visible error — the UI would just stop updating with no explanation. **Updated 2026-07-18:** both Provider.Mobile and Customer.Mobile now also trigger this same path from in-app "Start Demo" buttons (Tasks 10/11), not just the `/dev` console, so the blast radius of an unnoticed desync is now two mobile apps' worth of demo presenters instead of one console operator.
 
 **Recommended Improvement:** Either (a) log unhandled exceptions from `runTimeline` to console/ILogger so a desync is at least diagnosable from server logs, or (b) push a `Notification` hub event on timeline failure so the `/dev` console surfaces "Demo script failed: {reason}" instead of going silently quiet.
 
@@ -347,9 +454,9 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 
 **Prevention going forward:** Accepted recurrence — this was a deliberate, surfaced tradeoff (flagged explicitly to the user at the start of Plan 1 execution), not a silent drift. The mechanism for staying consistent is the README's "Notes" section, which explicitly documents "net10 is what the toolchain here provides — same code" so future contributors aren't surprised by the mismatch against the design docs.
 
-**Revisit When:** If this project needs to run in a CI environment or a teammate's machine pinned to net8 SDKs, or if MAUI's net10 workload manifests turn out to be unavailable/unstable (see the MAUI workload gap) forcing a broader retarget decision anyway.
+**Revisit When:** If this project needs to run in a CI environment or a teammate's machine pinned to net8 SDKs. **Updated 2026-07-18:** the other trigger condition — "MAUI's net10 workload manifests turn out to be unavailable/unstable" — is now resolved in the other direction: `dotnet workload install maui` succeeded (workload `10.0.20/10.0.100`) and both Customer.Mobile and Provider.Mobile build/run cleanly for `net10.0-maccatalyst`, so that fallback was never needed. The net10-vs-net8 compromise itself remains active/accepted; only the workload-availability uncertainty is gone. See [Archive: MAUI workload gap resolved](#archive).
 
-**Related:** [Gap: MAUI workload not installed](#2026-07-18--maui-workload-not-installed-customermobile-plan-2-cannot-build-yet)
+**Related:** none
 
 ---
 
@@ -385,9 +492,31 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 
 ---
 
+### 2026-07-18 — Provider.Mobile's in-app "Start Demo" button hardcodes customer id 1
+
+**Tradeoff:** The Provider.Mobile `DevSettings` screen's "▶ Start Demo (as this provider)" button calls `deps.StartDemo 1 s.UserId` — customer id `1` is hardcoded rather than derived from any session or selection. (Customer.Mobile's equivalent button correctly uses its own logged-in session's id, and separately picks an online provider or falls back to the first one.)
+
+**Why:** The seed data always creates "John" as the first customer (id 1, verified against Plan 1's seeder), and the provider side of the demo button has no natural "which customer" context to select from — there's no customer-selection UI in Provider.Mobile, and adding one purely to make a demo-convenience button fully general would be scope the prototype doesn't need.
+
+**Impact:** The button only works correctly against the seed data's default customer. If the seed data is ever regenerated with a different customer ordering, or a second customer is added and expected to be the demo's target, this button silently demos against the wrong (or a nonexistent) customer id rather than failing loudly.
+
+**Prevention going forward:** Accepted recurrence — this is a demo-convenience shortcut, not a business rule, and is already called out in the Plan 3 self-review notes ("StartDemo hardcodes customer id 1 (John is seeded first...) for the Provider-side button"). No mechanism enforces it; if the seed order ever changes, this is the first place to check when the Provider-side Start Demo button stops working as expected.
+
+**Revisit When:** If the seed data's customer ordering changes, or if Provider.Mobile ever needs a real customer-selection UI for any other reason (at which point the demo button should reuse that selection instead of the hardcoded id).
+
+**Related:** [Compromise: rating auto-closes a Completed job single-sidedly](#2026-07-18--rating-a-completed-job-auto-closes-it-single-sidedly), [Gap: Typing/Seen hub relay has no automated test](#2026-07-18--typingseen-hub-relay-has-no-automated-test-verified-manually-only)
+
+---
+
 ## Archive
 
 > Entries moved here when the underlying condition no longer applies.
 > Kept for historical context.
 
-*(none yet)*
+### 2026-07-18 — MAUI workload not installed; Customer.Mobile (Plan 2) cannot build yet
+
+Archived 2026-07-18 — resolved. `dotnet workload install maui` was run at some point between this gap being logged and Plan 3 (Provider.Mobile) execution; `dotnet workload list` now reports `maui 10.0.20/10.0.100` installed, and both Customer.Mobile and Provider.Mobile build and run cleanly for `net10.0-maccatalyst` (0 warnings/0 errors each, verified directly). The original gap's fallback plan (retarget to net9/net8 if net10 manifests were unavailable) was never needed.
+
+**Resolution:** No specific commit closes this — it was closed by an environment change (workload installation) outside the git history, observed as already-in-place at the start of Plan 3. The reasoning in [Compromise: targeted net10.0 instead of net8.0](#2026-07-18--targeted-net100-instead-of-the-designed-net80) stays active (net10-vs-net8 is still a real, accepted mismatch against the design docs) — only the *uncertainty about whether net10's MAUI workload would even be available* is retired.
+
+**Original entry:** `dotnet workload list` reports zero installed workloads in this environment. Xcode is present (`/Applications/Xcode.app`), so iOS/Mac Catalyst codesigning tooling exists, but the MAUI SDK workload itself (`maui`, `maui-android`, `maui-ios`, `maui-maccatalyst`) has not been installed. This blocked all of Plan 2 (Customer.Mobile) from starting until closed.
