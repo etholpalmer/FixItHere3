@@ -84,11 +84,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select newest available Xcode
+      # "Newest" is not the same as "usable": the image can carry an Xcode whose
+      # MacOSX platform SDK is absent, which fails later and far less clearly as
+      # `unable to find utility "actool"`. Select the newest install that actually
+      # has the SDK, so any remaining failure names the real constraint.
+      - name: Select newest complete Xcode
         run: |
-          ls /Applications | grep -i '^Xcode' || true
-          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
-          if [ -n "$latest" ]; then sudo xcode-select -s "$latest/Contents/Developer"; fi
+          best=""
+          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V); do
+            if [ -d "$app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" ]; then
+              best="$app"
+            else
+              echo "skipping $app — no MacOSX SDK"
+            fi
+          done
+          if [ -n "$best" ]; then
+            echo "selecting $best"
+            sudo xcode-select -s "$best/Contents/Developer"
+          fi
           xcodebuild -version
 
       - uses: actions/setup-dotnet@v4
