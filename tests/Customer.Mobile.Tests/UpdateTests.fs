@@ -233,8 +233,19 @@ let ``hub typing shows indicator for open chat only`` () =
 [<Fact>]
 let ``hub seen marks messages seen`` () =
     let session = Some (mkSession ())
-    let m0 = { Model.initial with Screen = Chat 7; Session = session }
-    Assert.True((up (HubSeen (7, 1, "Provider")) m0).MessagesSeen)
+    // The watermark records which of MY messages were seen, so one must exist.
+    let mine : MessageDto =
+        { Id = 10; JobId = 7; SenderId = 1; SenderRole = "Customer"; SenderName = "John"
+          Text = "hi"; PhotoBase64 = null; SentAt = ""; Seen = false }
+    let m0 = { Model.initial with Screen = Chat 7; Session = session; Messages = [mine] }
+    Assert.Equal(Some 10, (up (HubSeen (7, 1, "Provider")) m0).SeenUpToMessageId)
+
+[<Fact>]
+let ``seen watermark is cleared when a chat loads`` () =
+    let m0 =
+        { Model.initial with
+            Screen = Chat 7; Session = Some (mkSession ()); SeenUpToMessageId = Some 99 }
+    Assert.Equal(None, (up (MessagesLoaded []) m0).SeenUpToMessageId)
 
 [<Fact>]
 let ``start demo errors when not logged in`` () =

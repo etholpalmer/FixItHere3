@@ -43,7 +43,9 @@ type Model =
       FakeCallActive: bool
       ChatDraft: string
       ProviderTyping: bool
-      MessagesSeen: bool
+      /// Highest id of MY messages the provider has confirmed seeing. See the
+      /// Provider app for why this is a watermark rather than a bool.
+      SeenUpToMessageId: int option
       TypingCooldown: bool
       RatingStars: int
       RatingComment: string
@@ -58,7 +60,7 @@ module Model =
           Services = []; Providers = []; ProfileRatings = []
           Jobs = []; Messages = []; ProviderPositions = Map.empty
           PaymentResult = None; FakeCallActive = false
-          ChatDraft = ""; ProviderTyping = false; MessagesSeen = false; TypingCooldown = false
+          ChatDraft = ""; ProviderTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           RatingStars = 5; RatingComment = ""
           Toast = None; Error = None }
 

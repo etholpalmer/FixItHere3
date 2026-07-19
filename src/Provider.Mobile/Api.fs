@@ -18,6 +18,7 @@ let createDepsWith
     let transition (path: string) (jobId: int) : Task<Result<JobDto, string>> =
         Http.putEnv http (sprintf "/jobs/%d/%s" jobId path)
     { Login = fun name -> Http.postEnv http "/login" { Role = "Provider"; Name = name }
+      GetProvider = fun id -> Http.getEnv http (sprintf "/providers/%d" id)
       SetOnline = fun id online ->
           Http.putBodyEnv http (sprintf "/providers/%d/online" id) {| online = online |}
       GetMyJobs = fun providerId -> Http.getEnv http (sprintf "/jobs?providerId=%d" providerId)

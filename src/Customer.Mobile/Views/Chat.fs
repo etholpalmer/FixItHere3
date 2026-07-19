@@ -23,7 +23,9 @@ let view (model: Model) (jobId: int) =
                     let mine = model.Session |> Option.exists (fun s -> isSelf s m.SenderId m.SenderRole)
                     let prefix = if mine then "You" else m.SenderName
                     let seenSuffix =
-                        if mine && Some m.Id = lastMineId && model.MessagesSeen then " ✓✓ seen" else ""
+                        if mine && Some m.Id = lastMineId
+                           && (match model.SeenUpToMessageId with Some w -> m.Id <= w | None -> false)
+                        then " ✓✓ seen" else ""
                     if System.String.IsNullOrEmpty m.PhotoBase64 then
                         Label(sprintf "%s: %s%s" prefix m.Text seenSuffix)
                     else

@@ -33,7 +33,11 @@ type Model =
       Jobs: JobDto list
       Messages: MessageDto list
       CustomerTyping: bool
-      CustomerSeen: bool
+      /// Highest id of MY messages the customer has confirmed seeing. A bare
+      /// bool latched forever: once set it marked "✓✓ seen" on later messages
+      /// and on other jobs' chats. Ids are globally monotonic, so comparing
+      /// `m.Id <= watermark` scopes the marker correctly without extra state.
+      SeenUpToMessageId: int option
       TypingCooldown: bool
       AutoReply: bool
       AutoRepliesSent: int
@@ -50,7 +54,7 @@ module Model =
         { Screen = Splash; History = []; Session = None; Online = false
           MyLocation = (43.70, -79.45); UseRealGps = false; SliderStart = None
           Jobs = []; Messages = []
-          CustomerTyping = false; CustomerSeen = false; TypingCooldown = false
+          CustomerTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           AutoReply = false; AutoRepliesSent = 0
           ChatDraft = ""; RatingStars = 5; RatingComment = ""
           PaymentResult = None; FakeCallActive = false; Toast = None; Error = None }
@@ -62,6 +66,7 @@ type Msg =
     | Navigate of Screen
     | GoBack
     | SetOnline of bool
+    | ProviderHydrated of ProviderDto
     | OnlineChanged of ProviderDto
     | JobsLoaded of JobDto list
     | AcceptJob of jobId: int
@@ -107,6 +112,7 @@ type Msg =
 
 type ProviderApiDeps =
     { Login: string -> Task<Result<LoginResponse, string>>
+      GetProvider: int -> Task<Result<ProviderDto, string>>
       SetOnline: int -> bool -> Task<Result<ProviderDto, string>>
       GetMyJobs: int -> Task<Result<JobDto list, string>>
       Accept: int -> Task<Result<JobDto, string>>

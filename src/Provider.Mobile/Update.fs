@@ -29,7 +29,12 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         let session : Session = { Token = resp.Token; UserId = resp.UserId
                                   Role = resp.Role; DisplayName = resp.DisplayName }
         Nav.resetTo Home { model with Session = Some session },
-        apiCmd (fun () -> deps.GetMyJobs resp.UserId) JobsLoaded
+        Cmd.batch
+            [ apiCmd (fun () -> deps.GetMyJobs resp.UserId) JobsLoaded
+              // Online lives on the server (the seed marks providers online), so
+              // hydrate it instead of assuming the local default of false — which
+              // otherwise hid the available-jobs list until "Go Online" was pressed.
+              apiCmd (fun () -> deps.GetProvider resp.UserId) ProviderHydrated ]
     | Navigate target ->
         let m = Nav.push model target
         let cmd =
@@ -44,6 +49,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         match model.Session with
         | None -> model, Cmd.ofMsg (ApiError "Not logged in")
         | Some s -> model, apiCmd (fun () -> deps.SetOnline s.UserId b) OnlineChanged
+    | ProviderHydrated dto -> { model with Online = dto.Online }, Cmd.none
     | OnlineChanged dto ->
         { model with Online = dto.Online
                      Toast = Some (if dto.Online then "You are Online" else "You are Offline") },
@@ -96,7 +102,10 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             { model with SliderStart = Some start },
             apiCmd (fun () -> deps.UpdateLocation s.UserId la ln) LocationPushed
         | _ -> model, Cmd.none
-    | MessagesLoaded xs -> { model with Messages = xs }, Cmd.none
+    | MessagesLoaded xs ->
+        // Reset the seen watermark when a chat loads — a value carried over from
+        // another job can exceed this job's older ids and render a false marker.
+        { model with Messages = xs; SeenUpToMessageId = None }, Cmd.none
     | ChatDraftChanged t ->
         let m = { model with ChatDraft = t }
         match model.Screen, model.Session with
@@ -215,6 +224,15 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | HubSeen (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
-            { model with CustomerSeen = true }, Cmd.none
+            // The peer has seen everything I've sent on this job so far; record
+            // the high-water mark rather than latching a bool forever.
+            let myLatest =
+                model.Messages
+                |> List.filter (fun m -> m.JobId = jobId && isSelf s m.SenderId m.SenderRole)
+                |> List.map (fun m -> m.Id)
+                |> function [] -> None | ids -> Some (List.max ids)
+            (match myLatest with
+             | Some _ -> { model with SeenUpToMessageId = myLatest }
+             | None -> model), Cmd.none
         | _ -> model, Cmd.none
     | CustomerTypingExpired -> { model with CustomerTyping = false }, Cmd.none

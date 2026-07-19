@@ -76,7 +76,10 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | DismissToast -> { model with Toast = None }, Cmd.none
     | CancelActiveJob jobId ->
         model, apiCmd (fun () -> deps.CancelJob jobId) HubJobUpdated
-    | MessagesLoaded xs -> { model with Messages = xs }, Cmd.none
+    | MessagesLoaded xs ->
+        // Reset the seen watermark when a chat loads — a value carried over from
+        // another job can exceed this job's older ids and render a false marker.
+        { model with Messages = xs; SeenUpToMessageId = None }, Cmd.none
     | ChatDraftChanged t ->
         let m = { model with ChatDraft = t }
         match model.Screen, model.Session with
@@ -198,6 +201,15 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | HubSeen (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
-            { model with MessagesSeen = true }, Cmd.none
+            // The peer has seen everything I've sent on this job so far; record
+            // the high-water mark rather than latching a bool forever.
+            let myLatest =
+                model.Messages
+                |> List.filter (fun m -> m.JobId = jobId && isSelf s m.SenderId m.SenderRole)
+                |> List.map (fun m -> m.Id)
+                |> function [] -> None | ids -> Some (List.max ids)
+            (match myLatest with
+             | Some _ -> { model with SeenUpToMessageId = myLatest }
+             | None -> model), Cmd.none
         | _ -> model, Cmd.none
     | TypingExpired -> { model with ProviderTyping = false }, Cmd.none

@@ -34,6 +34,7 @@ let ``slider position interpolates and clamps`` () =
 
 let stubDeps : ProviderApiDeps =
     { Login = fun _ -> Task.FromResult(Ok { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" })
+      GetProvider = fun _ -> Task.FromResult(Error "unused")
       SetOnline = fun _ b -> Task.FromResult(Error "unused")
       GetMyJobs = fun _ -> Task.FromResult(Ok [])
       Accept = fun _ -> Task.FromResult(Error "unused")
@@ -152,8 +153,10 @@ let ``hub typing shows indicator for open chat only`` () =
 
 [<Fact>]
 let ``hub seen marks customer seen`` () =
-    let m0 = loggedIn { Model.initial with Screen = Chat 7 }
-    Assert.True((up (HubSeen (7, 1, "Customer")) m0).CustomerSeen)
+    // The watermark records which of MY messages were seen, so one must exist.
+    let mine = { mkChatMsg 10 7 1 "Provider" with SenderId = 4 }
+    let m0 = loggedIn { Model.initial with Screen = Chat 7; Messages = [mine] }
+    Assert.Equal(Some 10, (up (HubSeen (7, 1, "Customer")) m0).SeenUpToMessageId)
 
 [<Fact>]
 let ``rating submitted returns Home and resets`` () =
@@ -193,9 +196,51 @@ let ``my own message is not mistaken for the customer's when ids collide`` () =
 
 [<Fact>]
 let ``typing and seen indicators show when customer id equals my provider id`` () =
-    let m0 = { Model.initial with Screen = Chat 7; Session = Some collidingSession; Jobs = [collidingJob] }
+    // provider id 1 — my own message, same int as the job's customer id
+    let mine = mkChatMsg 10 7 1 "Provider"
+    let m0 =
+        { Model.initial with
+            Screen = Chat 7; Session = Some collidingSession
+            Jobs = [collidingJob]; Messages = [mine] }
     Assert.True((up (HubTyping (7, 1, "Customer")) m0).CustomerTyping)
-    Assert.True((up (HubSeen (7, 1, "Customer")) m0).CustomerSeen)
+    Assert.Equal(Some 10, (up (HubSeen (7, 1, "Customer")) m0).SeenUpToMessageId)
     // my own echo must not trigger either indicator
     Assert.False((up (HubTyping (7, 1, "Provider")) m0).CustomerTyping)
-    Assert.False((up (HubSeen (7, 1, "Provider")) m0).CustomerSeen)
+    Assert.Equal(None, (up (HubSeen (7, 1, "Provider")) m0).SeenUpToMessageId)
+
+// ---------------------------------------------------------------------------
+// Seen-watermark and Online-hydration regressions.
+// ---------------------------------------------------------------------------
+
+[<Fact>]
+let ``seen marker does not carry over to a later message on the same job`` () =
+    let mineOld = { mkChatMsg 10 7 1 "Provider" with SenderId = 4 }
+    let m0 =
+        { Model.initial with
+            Screen = Chat 7; Session = Some (mkSession 4); Jobs = [mkJob 7 "EnRoute"]
+            Messages = [mineOld] }
+    // customer confirms seeing message 10
+    let seen = up (HubSeen (7, 1, "Customer")) m0
+    Assert.Equal(Some 10, seen.SeenUpToMessageId)
+    // I then send a NEW message (id 11) — the watermark must not cover it
+    let mineNew = { mkChatMsg 11 7 1 "Provider" with SenderId = 4 }
+    let after = { seen with Messages = seen.Messages @ [mineNew] }
+    Assert.True(after.SeenUpToMessageId.Value < mineNew.Id)
+
+[<Fact>]
+let ``seen watermark is cleared when another job's chat loads`` () =
+    let m0 =
+        { Model.initial with
+            Screen = Chat 7; Session = Some (mkSession 4)
+            SeenUpToMessageId = Some 99 }
+    let m1 = up (MessagesLoaded []) m0
+    Assert.Equal(None, m1.SeenUpToMessageId)
+
+[<Fact>]
+let ``login hydrates Online from the server instead of defaulting to false`` () =
+    let dto : ProviderDto =
+        { Id = 4; BusinessName = "Elite HVAC"; ServiceId = 7; ServiceName = "HVAC"
+          Rating = 4.5; RatingCount = 2; Lat = 43.70; Lng = -79.45
+          Online = true; Vehicle = "Box truck"; PhotoUrl = "" }
+    Assert.False(Model.initial.Online)
+    Assert.True((up (ProviderHydrated dto) Model.initial).Online)
