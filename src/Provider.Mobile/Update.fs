@@ -43,6 +43,13 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             | Chat jobId, _ -> apiCmd (fun () -> deps.GetMessages jobId) MessagesLoaded
             | Payment jobId, _ -> delayCmd 2000 (PaymentDelayDone jobId)
             | _ -> Cmd.none
+        // Drop any previous job's receipt before the new one arrives, or the
+        // Payment screen renders the old job's number and amount for ~2s while
+        // PaymentDelayDone is in flight. (Customer.Mobile already did this.)
+        let m =
+            match target with
+            | Payment _ -> { m with PaymentResult = None }
+            | _ -> m
         m, cmd
     | GoBack -> Nav.back model, Cmd.none
     | SetOnline b ->
@@ -68,8 +75,12 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         let m = { model with Jobs = jobs }
         match model.Screen, job.State with
         | JobDetail id, _ when id = job.Id -> Nav.push m (ActiveJob job.Id), Cmd.none
-        | ActiveJob id, "EnRoute" when id = job.Id && m.UseRealGps ->
-            m, delayCmd 3000 (GpsTick job.Id)          // start GPS streaming loop
+        | ActiveJob id, "EnRoute" when id = job.Id && m.UseRealGps && not m.GpsLoopActive ->
+            // SliderStart is the origin of THIS travel leg; a value left over from a
+            // previous job (only cleared on RatingSubmitted) would anchor the
+            // simulated route to the wrong city.
+            { m with GpsLoopActive = true; SliderStart = None },
+            delayCmd 3000 (GpsTick job.Id)   // start GPS loop (once)
         | ActiveJob id, "Completed" when id = job.Id ->
             Nav.push m (Payment job.Id), delayCmd 2000 (PaymentDelayDone job.Id)
         | _ -> m, Cmd.none
@@ -84,7 +95,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             Cmd.batch
                 [ apiCmd deps.GetGpsLocation (fun (la, ln) -> GpsFetched (jobId, la, ln))
                   delayCmd 3000 (GpsTick jobId) ]
-        | _ -> model, Cmd.none
+        | _ -> { model with GpsLoopActive = false }, Cmd.none
     | GpsFetched (_, la, ln) ->
         // apply the freshly-fetched reading and push that SAME reading to the server
         // (compute once, use twice — avoids pushing a stale model.MyLocation)
@@ -106,8 +117,8 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         // Reset the seen watermark when a chat loads — a value carried over from
         // another job can exceed this job's older ids and render a false marker.
         { model with Messages = xs; SeenUpToMessageId = None }, Cmd.none
-    | ChatDraftChanged t ->
-        let m = { model with ChatDraft = t }
+    | ChatDraftChanged (draftJobId, t) ->
+        let m = { model with ChatDrafts = model.ChatDrafts |> Map.add draftJobId t }
         match model.Screen, model.Session with
         | Chat jobId, Some s when not model.TypingCooldown ->
             { m with TypingCooldown = true },
@@ -124,7 +135,10 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         | Some s ->
             let req = { JobId = jobId; SenderId = s.UserId; SenderRole = s.Role
                         Text = text; PhotoBase64 = photo }
-            { model with ChatDraft = "" }, apiCmd (fun () -> deps.SendMessage req) ChatMessageSent
+            // Clear only THIS job's draft, so an auto-reply on another job cannot
+            // wipe what the user is composing in the chat they have open.
+            { model with ChatDrafts = model.ChatDrafts |> Map.remove jobId },
+            apiCmd (fun () -> deps.SendMessage req) ChatMessageSent
     | PickAndSendPhoto jobId ->
         // Spec: at most 5 photos per job from this provider.
         let isMineMsg (m: FixItHere.Shared.Dtos.MessageDto) =
@@ -147,6 +161,9 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             then model.Messages else model.Messages @ [m2]
         { model with Messages = msgs }, Cmd.none
     | AutoReplyToggled b -> { model with AutoReply = b }, Cmd.none
+    | AutoReplyDue jobId when not model.AutoReply ->
+        // Toggled off during the 5s delay — drop the scheduled reply.
+        model, Cmd.none
     | AutoReplyDue jobId ->
         let canned = [ "On my way."; "Looks good."; "See you shortly." ]
         let text = canned.[model.AutoRepliesSent % canned.Length]
@@ -180,7 +197,8 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         { model with UseRealGps = true },
         apiCmd deps.GetGpsLocation (fun (la, ln) -> SetLocation (la, ln))
     | SetUseRealGps false ->
-        { model with UseRealGps = false; MyLocation = Model.initial.MyLocation }, Cmd.none
+        { model with UseRealGps = false; MyLocation = Model.initial.MyLocation
+                     SliderStart = None }, Cmd.none
     | StartDemo ->
         match model.Session with
         | Some s -> model, apiCmd (fun () -> deps.StartDemo 1 s.UserId) DemoStarted   // customer 1 = John (seed order)
@@ -215,11 +233,17 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
               else Cmd.none ]
         m, Cmd.batch cmds
     | HubLocationUpdated _ -> model, Cmd.none
+    | HubProviderUpdated dto ->
+        // Reflect my own online state if it was changed elsewhere (e.g. /dev console).
+        match model.Session with
+        | Some s when s.UserId = dto.Id -> { model with Online = dto.Online }, Cmd.none
+        | _ -> model, Cmd.none
     | HubNotification text -> { model with Toast = Some text }, Cmd.none
     | HubTyping (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
-            { model with CustomerTyping = true }, delayCmd 3000 CustomerTypingExpired
+            let token = model.TypingToken + 1
+            { model with CustomerTyping = true; TypingToken = token }, delayCmd 3000 (CustomerTypingExpired token)
         | _ -> model, Cmd.none
     | HubSeen (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
@@ -235,4 +259,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
              | Some _ -> { model with SeenUpToMessageId = myLatest }
              | None -> model), Cmd.none
         | _ -> model, Cmd.none
-    | CustomerTypingExpired -> { model with CustomerTyping = false }, Cmd.none
+    | CustomerTypingExpired token ->
+        // Ignore stale timers: a newer HubTyping has already extended the window.
+        if token = model.TypingToken then { model with CustomerTyping = false }, Cmd.none
+        else model, Cmd.none

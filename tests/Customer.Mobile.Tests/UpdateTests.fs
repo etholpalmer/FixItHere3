@@ -174,9 +174,9 @@ let ``sixth photo for a job is rejected with an error`` () =
 [<Fact>]
 let ``chat draft tracks input and clears on send`` () =
     let session = Some (mkSession ())
-    let m1 = up (ChatDraftChanged "hello") { Model.initial with Session = session }
-    Assert.Equal("hello", m1.ChatDraft)
-    Assert.Equal("", (up (SendChatMessage (7, "hello", null)) m1).ChatDraft)
+    let m1 = up (ChatDraftChanged (7, "hello")) { Model.initial with Session = session }
+    Assert.Equal("hello", draftFor m1.ChatDrafts 7)
+    Assert.Equal("", draftFor (up (SendChatMessage (7, "hello", null)) m1).ChatDrafts 7)
 
 [<Fact>]
 let ``stars and comment update`` () =
@@ -217,7 +217,7 @@ let ``disabling real GPS resets location to the seed default`` () =
 let ``typing cooldown blocks resend until done`` () =
     let session = Some (mkSession ())
     let m0 = { Model.initial with Screen = Chat 7; Session = session }
-    let m1 = up (ChatDraftChanged "h") m0
+    let m1 = up (ChatDraftChanged (7, "h")) m0
     Assert.True(m1.TypingCooldown)
     let m2 = up TypingCooldownDone m1
     Assert.False(m2.TypingCooldown)
@@ -228,7 +228,8 @@ let ``hub typing shows indicator for open chat only`` () =
     let m0 = { Model.initial with Screen = Chat 7; Session = session }
     Assert.True((up (HubTyping (7, 1, "Provider")) m0).ProviderTyping)
     Assert.False((up (HubTyping (99, 1, "Provider")) m0).ProviderTyping)
-    Assert.False((up TypingExpired (up (HubTyping (7, 1, "Provider")) m0)).ProviderTyping)
+    let typing = up (HubTyping (7, 1, "Provider")) m0
+    Assert.False((up (TypingExpired typing.TypingToken) typing).ProviderTyping)
 
 [<Fact>]
 let ``hub seen marks messages seen`` () =
@@ -253,3 +254,62 @@ let ``start demo errors when not logged in`` () =
     let mutable dispatched = []
     for sub in cmd do sub (fun m -> dispatched <- m :: dispatched)
     Assert.Contains(ApiError "Not logged in", dispatched)
+
+// ---------------------------------------------------------------------------
+// Cmd-executing tests — mirrors Provider.Mobile. The `up` helper discards the
+// Cmd, and SendTyping/SendSeen only ever run inside one, so flag-only tests
+// could not detect a removed throttle.
+// ---------------------------------------------------------------------------
+
+let private runWith deps msg model =
+    let m, cmd = Update.update deps msg model
+    let dispatched = ResizeArray<Msg>()
+    for sub in cmd do sub dispatched.Add
+    m, List.ofSeq dispatched
+
+[<Fact>]
+let ``typing throttle actually suppresses the second send`` () =
+    let typing = ResizeArray<int * int * string>()
+    let deps = { stubDeps with SendTyping = fun j s r -> typing.Add(j, s, r) }
+    let m0 = { Model.initial with Screen = Chat 7; Session = Some (mkSession ()) }
+    let m1, _ = runWith deps (ChatDraftChanged (7, "h")) m0
+    Assert.Equal(1, typing.Count)
+    let m2, _ = runWith deps (ChatDraftChanged (7, "he")) m1
+    Assert.Equal(1, typing.Count)
+    let m3, _ = runWith deps TypingCooldownDone m2
+    runWith deps (ChatDraftChanged (7, "hel")) m3 |> ignore
+    Assert.Equal(2, typing.Count)
+    let (_, senderId, senderRole) = typing.[0]
+    Assert.Equal(1, senderId)
+    Assert.Equal("Customer", senderRole)
+
+[<Fact>]
+let ``seen is sent only for the chat that is open`` () =
+    let seen = ResizeArray<int * int * string>()
+    let deps = { stubDeps with SendSeen = fun j s r -> seen.Add(j, s, r) }
+    let incoming = mkChatMsg 10 7
+    let openChat = { Model.initial with Screen = Chat 7; Session = Some (mkSession ()) }
+    runWith deps (HubMessageReceived incoming) openChat |> ignore
+    Assert.Equal(1, seen.Count)
+    let otherChat = { Model.initial with Screen = Chat 9; Session = Some (mkSession ()) }
+    runWith deps (HubMessageReceived incoming) otherChat |> ignore
+    Assert.Equal(1, seen.Count)
+
+[<Fact>]
+let ``a stale typing-expiry timer does not clear an extended indicator`` () =
+    let m0 = { Model.initial with Screen = Chat 7; Session = Some (mkSession ()) }
+    let m1 = up (HubTyping (7, 1, "Provider")) m0
+    let m2 = up (HubTyping (7, 1, "Provider")) m1
+    Assert.True(m2.ProviderTyping)
+    Assert.True((up (TypingExpired 1) m2).ProviderTyping)
+    Assert.False((up (TypingExpired m2.TypingToken) m2).ProviderTyping)
+
+[<Fact>]
+let ``hub provider update refreshes the cached provider list`` () =
+    let p0 : ProviderDto =
+        { Id = 1; BusinessName = "Mike's Plumbing"; ServiceId = 3; ServiceName = "Plumbing"
+          Rating = 4.0; RatingCount = 2; Lat = 43.6; Lng = -79.4
+          Online = false; Vehicle = "White van"; PhotoUrl = "" }
+    let m0 = { Model.initial with Providers = [p0] }
+    let m1 = up (HubProviderUpdated { p0 with Online = true }) m0
+    Assert.True((m1.Providers |> List.head).Online)

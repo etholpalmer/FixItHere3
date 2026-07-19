@@ -4,7 +4,13 @@ open System
 open FixItHere.Shared
 open FixItHere.Backend.Db
 
+/// Fixed timestamp for SEEDED rows, so the seed stays byte-identical across runs.
 let Epoch = "2026-01-01T00:00:00Z"
+
+/// Wall-clock timestamp for rows created at RUNTIME. Seeded and live rows shared
+/// Epoch, which made live chat messages indistinguishable from seeded ones and
+/// left every message and location stamped 2026-01-01.
+let nowIso () = DateTimeOffset.UtcNow.ToString("o")
 
 /// Deterministic: fixed name lists, Random(42), fixed epoch. No wall clock.
 let run (db: AppDb) =

@@ -6,9 +6,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\src\Customer.Mobile\ClientShared\Config.fs" Condition="Exists('..\..\src\Customer.Mobile\ClientShared\Config.fs')" />
-    <Compile Include="..\..\src\Customer.Mobile\ClientShared\Geo.fs" Condition="Exists('..\..\src\Customer.Mobile\ClientShared\Geo.fs')" />
-    <Compile Include="..\..\src\Customer.Mobile\ClientShared\Http.fs" Condition="Exists('..\..\src\Customer.Mobile\ClientShared\Http.fs')" />
+    <Compile Include="..\..\src\ClientShared\Config.fs" Condition="Exists('..\..\src\ClientShared\Config.fs')" />
+    <Compile Include="..\..\src\ClientShared\Geo.fs" Condition="Exists('..\..\src\ClientShared\Geo.fs')" />
+    <Compile Include="..\..\src\ClientShared\Http.fs" Condition="Exists('..\..\src\ClientShared\Http.fs')" />
     <Compile Include="..\..\src\Provider.Mobile\Domain.fs" />
     <Compile Include="..\..\src\Provider.Mobile\Api.fs" Condition="Exists('..\..\src\Provider.Mobile\Api.fs')" />
     <Compile Include="..\..\src\Provider.Mobile\Update.fs" Condition="Exists('..\..\src\Provider.Mobile\Update.fs')" />

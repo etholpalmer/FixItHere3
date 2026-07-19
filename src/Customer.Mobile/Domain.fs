@@ -9,6 +9,12 @@ open FixItHere.Shared.Dtos
 type Session = { Token: string; UserId: int; Role: string; DisplayName: string }
 
 [<AutoOpen>]
+module Drafts =
+    /// Draft for one job; empty when nothing has been typed there yet.
+    let draftFor (drafts: Map<int, string>) (jobId: int) =
+        drafts |> Map.tryFind jobId |> Option.defaultValue ""
+
+[<AutoOpen>]
 module Actor =
     /// True when (id, role) identifies the same actor as the session.
     let isSelf (s: Session) (id: int) (role: string) = id = s.UserId && role = s.Role
@@ -41,7 +47,13 @@ type Model =
       ProviderPositions: Map<int, float * float>
       PaymentResult: PaymentResult option
       FakeCallActive: bool
-      ChatDraft: string
+      /// Draft text per job id. A single global draft meant an auto-reply (or a
+      /// send on another job) wiped whatever was half-typed in the open chat.
+      ChatDrafts: Map<int, string>
+      /// Generation counter for typing-expiry timers. Each HubTyping schedules an
+      /// independent 3s timer; without a token an older timer fires while the peer
+      /// is still typing and clears the indicator early.
+      TypingToken: int
       ProviderTyping: bool
       /// Highest id of MY messages the provider has confirmed seeing. See the
       /// Provider app for why this is a watermark rather than a bool.
@@ -60,7 +72,7 @@ module Model =
           Services = []; Providers = []; ProfileRatings = []
           Jobs = []; Messages = []; ProviderPositions = Map.empty
           PaymentResult = None; FakeCallActive = false
-          ChatDraft = ""; ProviderTyping = false; SeenUpToMessageId = None; TypingCooldown = false
+          ChatDrafts = Map.empty; TypingToken = 0; ProviderTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           RatingStars = 5; RatingComment = ""
           Toast = None; Error = None }
 
@@ -78,7 +90,7 @@ type Msg =
     | JobCreated of JobDto
     | CancelActiveJob of jobId: int
     | MessagesLoaded of MessageDto list
-    | ChatDraftChanged of string
+    | ChatDraftChanged of jobId: int * text: string
     | SendChatMessage of jobId: int * text: string * photoBase64: string
     | PickAndSendPhoto of jobId: int
     | ChatMessageSent of MessageDto
@@ -95,10 +107,11 @@ type Msg =
     | HubJobUpdated of JobDto
     | HubMessageReceived of MessageDto
     | HubLocationUpdated of LocationDto
+    | HubProviderUpdated of ProviderDto
     | HubNotification of string
     | HubTyping of jobId: int * senderId: int * senderRole: string
     | HubSeen of jobId: int * senderId: int * senderRole: string
-    | TypingExpired
+    | TypingExpired of token: int
     | TypingCooldownDone
     | StartDemo
     | DismissToast

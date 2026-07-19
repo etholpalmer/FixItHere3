@@ -35,8 +35,8 @@ let view (model: Model) (jobId: int) =
             })
         )).gridRow(1)
         (HStack(spacing = 8.) {
-            Entry(model.ChatDraft, ChatDraftChanged)
-            Button("Send", SendChatMessage (jobId, model.ChatDraft, null))
+            Entry(draftFor model.ChatDrafts jobId, fun t -> ChatDraftChanged (jobId, t))
+            Button("Send", SendChatMessage (jobId, draftFor model.ChatDrafts jobId, null))
             Button("📷", PickAndSendPhoto jobId)
         }).gridRow(2)
     }).padding(12.)

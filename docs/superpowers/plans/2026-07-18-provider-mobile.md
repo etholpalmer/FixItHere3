@@ -34,7 +34,11 @@
 2. All Plan 2 executor notes apply verbatim (F#9 attributes, linked-file testing, JSON case-insensitivity, hub event names, no F#→JS bridge, `Cmd.ofTaskMsg` adaptation rule, warnings). Read them: `docs/superpowers/plans/2026-07-18-customer-mobile.md` §Executor notes.
 3. **Purity split:** `Domain.fs`, `Api.fs`, `Update.fs` (Provider) and all `ClientShared` files except `Hub.fs` are MAUI-free. `ClientShared/Hub.fs` depends only on the SignalR client package (not MAUI) so it links into test projects safely, but tests must never call `Start`.
 4. **Refactor safety (Task 2):** after extracting ClientShared, ALL existing Customer.Mobile tests must pass unchanged (only `open`/qualifier updates in test files are allowed). If a Customer test needs behavioral changes, the refactor is wrong — stop.
-5. **Hub sends from update are Cmds:** `deps.SendTyping`/`SendSeen` are `int -> int -> unit` fire-and-forget; invoke them only inside `Cmd.ofEffect (fun _ -> ...)`, never bare in `update`.
+5. **Hub sends from update are Cmds:** `deps.SendTyping`/`SendSeen` are `int -> int -> string -> unit` fire-and-forget (the third argument is the sender's role — see the identity note below); invoke them only inside a dispatch-capturing Cmd, never bare in `update`.
+
+   > **Corrected 2026-07-19:** this plan specified `Cmd.ofEffect`, which does **not** exist in the Fabulous version this repo actually uses (2.4.0 ships `batch, map, none, ofAsyncMsg, ofAsyncMsgOption, ofAsyncResult, ofMsg, ofMsgOption, ofSub, ofTaskMsg, ofTaskResult`; `ofEffect` arrives in Fabulous 3). The requirement as written was unsatisfiable. `Cmd.ofSub` is the v2 equivalent and satisfies the intent — the effect is deferred into the Cmd rather than run inline in `update`. Plan 2's executor notes already anticipated this ("if the name differs (`Cmd.ofSub` in older lines), adapt mechanically").
+
+6. **Actor identity is (id, role), never a bare id:** customer and provider ids are independent sequences that both start at 1, so the seeded demo pair is customer 1 and provider 1. Compare identities via `isSelf session id role`; `MessageDto`/`SendMessageRequest` and the Typing/Seen hub events all carry `SenderRole`.
 6. **One Active Job assumption:** the provider's "active job" = the single job in state `EnRoute`/`Arrived`/`InProgress`, else the accepted `Scheduled` one being viewed. Helper `activeJob : Model -> JobDto option` in Provider Domain.fs is the only place this rule lives.
 7. **Slider math is pure and tested:** `Slider.position : start:(float*float) -> target:(float*float) -> pct:float -> (float*float)` (linear interpolation, pct clamped 0–1) lives in Provider `Domain.fs`.
 8. **Backend tests:** reuse `tests/Backend.Api.Tests` patterns (`Factory`, envelope deserialization). Do not touch existing backend tests.
@@ -43,9 +47,9 @@
 
 - Backend diff never exceeds the two sanctioned amendments; `src/Shared` untouched all plan long.
 - ClientShared files are consumed by link in Provider (no copies); Customer tests green after Task 2 with no behavioral test edits.
-- Provider update purity: no MAUI/Fabulous.Maui opens in Domain/Api/Update; hub sends only via `Cmd.ofEffect`; all state transitions go through the backend endpoints (never local job-state mutation).
+- Provider update purity: no MAUI/Fabulous.Maui opens in Domain/Api/Update; hub sends only via a dispatch-capturing Cmd (`Cmd.ofSub` in Fabulous 2.4.0 — see Executor note 5); all state transitions go through the backend endpoints (never local job-state mutation).
 - Typing/Seen: throttle honored (no `SendTyping` while cooldown true); `Seen` sent only when chat for that job is the active screen.
-- Auto-Reply: only replies to messages from the job's customer (never to own/auto messages — guard on `SenderId`), rotation order per Global Constraints, exactly one reply per incoming message.
+- Auto-Reply: only replies to messages from the job's customer (never to own/auto messages — guard on `SenderId` **and** `SenderRole`; an id-only guard silently fails for the colliding demo pair), rotation order per Global Constraints, exactly one reply per incoming message, and the `AutoReply` flag is re-checked when the delayed reply fires.
 - Nav invariants + envelope discipline: same rules as Plan 2's checklist.
 - Every Fabulous adaptation noted in commit bodies; conventional commits; no AI attribution trailers.
 

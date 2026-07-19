@@ -151,7 +151,7 @@ let mapAll (app: WebApplication) =
             let msg =
                 { Id = 0; JobId = req.JobId; SenderId = req.SenderId; SenderRole = senderRole
                   Text = req.Text; PhotoBase64 = req.PhotoBase64
-                  SentAt = FixItHere.Backend.Seed.Epoch; Seen = false }
+                  SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false }
             db.Messages.Add msg |> ignore
             db.SaveChanges() |> ignore
             let saved = db.Messages.OrderByDescending(fun m -> m.Id).First()
@@ -198,7 +198,7 @@ let mapAll (app: WebApplication) =
         match db.Providers.SingleOrDefault(fun p -> p.Id = providerId) |> Option.ofObj with
         | Some p ->
             okJson { ProviderId = p.Id; Lat = p.Lat; Lng = p.Lng
-                     UpdatedAt = FixItHere.Backend.Seed.Epoch }
+                     UpdatedAt = FixItHere.Backend.Seed.nowIso () }
         | None -> err 404 (sprintf "Provider %d not found" providerId))) |> ignore
 
     app.MapPut("/location", Func<UpdateLocationRequest, AppDb, IBroadcaster, System.Threading.Tasks.Task<IResult>>(
@@ -210,7 +210,7 @@ let mapAll (app: WebApplication) =
                 db.Entry(prov).CurrentValues.SetValues(updated)
                 db.SaveChanges() |> ignore
                 let dto = { ProviderId = prov.Id; Lat = req.Lat; Lng = req.Lng
-                            UpdatedAt = FixItHere.Backend.Seed.Epoch }
+                            UpdatedAt = FixItHere.Backend.Seed.nowIso () }
                 do! hub.LocationUpdated dto
                 return okJson dto })) |> ignore
 

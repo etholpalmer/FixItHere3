@@ -58,7 +58,8 @@ let private updateWithHub (msg: Msg) (model: Model) =
                                 (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
                                 (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
                                 (fun (j, s, r) -> dispatch (HubTyping (j, s, r))),
-                                (fun (j, s, r) -> dispatch (HubSeen (j, s, r))))
+                                (fun (j, s, r) -> dispatch (HubSeen (j, s, r))),
+                                (HubProviderUpdated >> dispatch))
                         // Only latch once connected: WithAutomaticReconnect does not cover
                         // the initial StartAsync, so latching before it succeeds would leave
                         // the app permanently HTTP-only with no retry and no visible error.

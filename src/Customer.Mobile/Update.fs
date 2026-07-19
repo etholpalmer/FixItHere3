@@ -80,8 +80,8 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         // Reset the seen watermark when a chat loads — a value carried over from
         // another job can exceed this job's older ids and render a false marker.
         { model with Messages = xs; SeenUpToMessageId = None }, Cmd.none
-    | ChatDraftChanged t ->
-        let m = { model with ChatDraft = t }
+    | ChatDraftChanged (draftJobId, t) ->
+        let m = { model with ChatDrafts = model.ChatDrafts |> Map.add draftJobId t }
         match model.Screen, model.Session with
         | Chat jobId, Some s when not model.TypingCooldown ->
             { m with TypingCooldown = true },
@@ -100,7 +100,10 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         | Some s ->
             let req = { JobId = jobId; SenderId = s.UserId; SenderRole = s.Role
                         Text = text; PhotoBase64 = photo }
-            { model with ChatDraft = "" }, apiCmd (fun () -> deps.SendMessage req) ChatMessageSent
+            // Clear only THIS job's draft, so an auto-reply on another job cannot
+            // wipe what the user is composing in the chat they have open.
+            { model with ChatDrafts = model.ChatDrafts |> Map.remove jobId },
+            apiCmd (fun () -> deps.SendMessage req) ChatMessageSent
     | PickAndSendPhoto jobId ->
         // Spec: at most 5 photos per job from this customer.
         let isMineMsg (m: FixItHere.Shared.Dtos.MessageDto) =
@@ -192,11 +195,20 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | HubLocationUpdated loc ->
         { model with ProviderPositions = model.ProviderPositions.Add(loc.ProviderId, (loc.Lat, loc.Lng)) },
         Cmd.none
+    | HubProviderUpdated dto ->
+        // Keep the cached provider list fresh so online/offline changes are
+        // reflected (StartDemo picks the first online provider from this list).
+        let providers =
+            if model.Providers |> List.exists (fun p -> p.Id = dto.Id)
+            then model.Providers |> List.map (fun p -> if p.Id = dto.Id then dto else p)
+            else model.Providers
+        { model with Providers = providers }, Cmd.none
     | HubNotification text -> { model with Toast = Some text }, Cmd.none
     | HubTyping (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
-            { model with ProviderTyping = true }, delayCmd 3000 TypingExpired
+            let token = model.TypingToken + 1
+            { model with ProviderTyping = true; TypingToken = token }, delayCmd 3000 (TypingExpired token)
         | _ -> model, Cmd.none
     | HubSeen (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
@@ -212,4 +224,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
              | Some _ -> { model with SeenUpToMessageId = myLatest }
              | None -> model), Cmd.none
         | _ -> model, Cmd.none
-    | TypingExpired -> { model with ProviderTyping = false }, Cmd.none
+    | TypingExpired token ->
+        // Ignore stale timers: a newer HubTyping has already extended the window.
+        if token = model.TypingToken then { model with ProviderTyping = false }, Cmd.none
+        else model, Cmd.none

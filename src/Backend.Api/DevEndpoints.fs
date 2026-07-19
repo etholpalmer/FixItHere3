@@ -46,19 +46,19 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
             db.SaveChanges() |> ignore
             do! hub.LocationUpdated
                     { ProviderId = prov.Id; Lat = lat; Lng = lng
-                      UpdatedAt = FixItHere.Backend.Seed.Epoch }
+                      UpdatedAt = FixItHere.Backend.Seed.nowIso () }
             if i = 2 then
                 do! hub.MessageReceived
                         { Id = 0; JobId = jobId; SenderId = job.CustomerId
                           SenderRole = "Customer"; SenderName = "Customer"
                           Text = "Hi!"; PhotoBase64 = null
-                          SentAt = FixItHere.Backend.Seed.Epoch; Seen = false }
+                          SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false }
             if i = 3 then
                 do! hub.MessageReceived
                         { Id = 0; JobId = jobId; SenderId = job.ProviderId
                           SenderRole = "Provider"; SenderName = "Provider"
                           Text = "On my way."; PhotoBase64 = null
-                          SentAt = FixItHere.Backend.Seed.Epoch; Seen = false }
+                          SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false }
         do! pause ()
         do! hub.Notify "Provider Arriving"
         do! apply Arrive

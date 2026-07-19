@@ -9,6 +9,12 @@ open FixItHere.Shared.Dtos
 type Session = { Token: string; UserId: int; Role: string; DisplayName: string }
 
 [<AutoOpen>]
+module Drafts =
+    /// Draft for one job; empty when nothing has been typed there yet.
+    let draftFor (drafts: Map<int, string>) (jobId: int) =
+        drafts |> Map.tryFind jobId |> Option.defaultValue ""
+
+[<AutoOpen>]
 module Actor =
     /// True when (id, role) identifies the same actor as the session.
     let isSelf (s: Session) (id: int) (role: string) = id = s.UserId && role = s.Role
@@ -30,6 +36,9 @@ type Model =
       MyLocation: float * float
       UseRealGps: bool
       SliderStart: (float * float) option
+      /// Guards the 3s GPS polling loop. JobActioned can fire twice (e.g. a
+      /// double-tapped "Depart"), which would start two concurrent loops.
+      GpsLoopActive: bool
       Jobs: JobDto list
       Messages: MessageDto list
       CustomerTyping: bool
@@ -41,7 +50,13 @@ type Model =
       TypingCooldown: bool
       AutoReply: bool
       AutoRepliesSent: int
-      ChatDraft: string
+      /// Draft text per job id. A single global draft meant an auto-reply (or a
+      /// send on another job) wiped whatever was half-typed in the open chat.
+      ChatDrafts: Map<int, string>
+      /// Generation counter for typing-expiry timers. Each HubTyping schedules an
+      /// independent 3s timer; without a token an older timer fires while the peer
+      /// is still typing and clears the indicator early.
+      TypingToken: int
       RatingStars: int
       RatingComment: string
       PaymentResult: PaymentResult option
@@ -52,11 +67,11 @@ type Model =
 module Model =
     let initial =
         { Screen = Splash; History = []; Session = None; Online = false
-          MyLocation = (43.70, -79.45); UseRealGps = false; SliderStart = None
+          MyLocation = (43.70, -79.45); UseRealGps = false; SliderStart = None; GpsLoopActive = false
           Jobs = []; Messages = []
           CustomerTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           AutoReply = false; AutoRepliesSent = 0
-          ChatDraft = ""; RatingStars = 5; RatingComment = ""
+          ChatDrafts = Map.empty; TypingToken = 0; RatingStars = 5; RatingComment = ""
           PaymentResult = None; FakeCallActive = false; Toast = None; Error = None }
 
 type Msg =
@@ -80,7 +95,7 @@ type Msg =
     | LocationPushed of LocationDto
     | SliderMoved of pct: float
     | MessagesLoaded of MessageDto list
-    | ChatDraftChanged of string
+    | ChatDraftChanged of jobId: int * text: string
     | TypingCooldownDone
     | SendChatMessage of jobId: int * text: string * photoBase64: string
     | PickAndSendPhoto of jobId: int
@@ -102,10 +117,11 @@ type Msg =
     | HubJobUpdated of JobDto
     | HubMessageReceived of MessageDto
     | HubLocationUpdated of LocationDto
+    | HubProviderUpdated of ProviderDto
     | HubNotification of string
     | HubTyping of jobId: int * senderId: int * senderRole: string
     | HubSeen of jobId: int * senderId: int * senderRole: string
-    | CustomerTypingExpired
+    | CustomerTypingExpired of token: int
     | DismissToast
     | DismissError
     | ApiError of string

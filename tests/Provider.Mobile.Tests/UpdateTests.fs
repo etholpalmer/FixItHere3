@@ -139,7 +139,7 @@ let ``own hub-echoed message appends once without duplicating`` () =
 [<Fact>]
 let ``typing cooldown blocks resend until done`` () =
     let m0 = loggedIn { Model.initial with Screen = Chat 7 }
-    let m1 = up (ChatDraftChanged "h") m0
+    let m1 = up (ChatDraftChanged (7, "h")) m0
     Assert.True(m1.TypingCooldown)
     let m2 = up TypingCooldownDone m1
     Assert.False(m2.TypingCooldown)
@@ -149,7 +149,8 @@ let ``hub typing shows indicator for open chat only`` () =
     let m0 = loggedIn { Model.initial with Screen = Chat 7 }
     Assert.True((up (HubTyping (7, 1, "Customer")) m0).CustomerTyping)
     Assert.False((up (HubTyping (99, 1, "Customer")) m0).CustomerTyping)
-    Assert.False((up CustomerTypingExpired (up (HubTyping (7, 1, "Customer")) m0)).CustomerTyping)
+    let typing = up (HubTyping (7, 1, "Customer")) m0
+    Assert.False((up (CustomerTypingExpired typing.TypingToken) typing).CustomerTyping)
 
 [<Fact>]
 let ``hub seen marks customer seen`` () =
@@ -244,3 +245,110 @@ let ``login hydrates Online from the server instead of defaulting to false`` () 
           Online = true; Vehicle = "Box truck"; PhotoUrl = "" }
     Assert.False(Model.initial.Online)
     Assert.True((up (ProviderHydrated dto) Model.initial).Online)
+
+// ---------------------------------------------------------------------------
+// Cmd-executing tests.
+//
+// The `up` helper above discards the Cmd<Msg>, and SendTyping/SendSeen are only
+// ever invoked from inside a Cmd. Every typing/seen test that used `up` could
+// therefore only observe model flags — it would still pass if the throttle were
+// removed entirely. These drain the Cmd against recording stubs so the two
+// gating criteria (typing throttled, Seen only for the open chat) can fail.
+// ---------------------------------------------------------------------------
+
+/// Runs update and executes the returned Cmd, capturing dispatched messages.
+let private runWith deps msg model =
+    let m, cmd = Update.update deps msg model
+    let dispatched = ResizeArray<Msg>()
+    for sub in cmd do sub dispatched.Add
+    m, List.ofSeq dispatched
+
+let private recordingDeps (typing: ResizeArray<int * int * string>) (seen: ResizeArray<int * int * string>) =
+    { stubDeps with
+        SendTyping = fun j s r -> typing.Add(j, s, r)
+        SendSeen = fun j s r -> seen.Add(j, s, r) }
+
+[<Fact>]
+let ``typing throttle actually suppresses the second send`` () =
+    let typing, seen = ResizeArray(), ResizeArray()
+    let deps = recordingDeps typing seen
+    let m0 = loggedIn { Model.initial with Screen = Chat 7 }
+    let m1, _ = runWith deps (ChatDraftChanged (7, "h")) m0
+    Assert.Equal(1, typing.Count)
+    // second keystroke while the cooldown is up must NOT reach the hub
+    let m2, _ = runWith deps (ChatDraftChanged (7, "he")) m1
+    Assert.Equal(1, typing.Count)
+    // after the cooldown elapses it may send again
+    let m3, _ = runWith deps TypingCooldownDone m2
+    let _ = runWith deps (ChatDraftChanged (7, "hel")) m3
+    Assert.Equal(2, typing.Count)
+    let (jobId, senderId, senderRole) = typing.[0]
+    Assert.Equal(7, jobId)
+    Assert.Equal(4, senderId)
+    Assert.Equal("Provider", senderRole)
+
+[<Fact>]
+let ``seen is sent only for the chat that is open`` () =
+    let typing, seen = ResizeArray(), ResizeArray()
+    let deps = recordingDeps typing seen
+    let incoming = mkChatMsg 10 7 1 "Customer"
+    // chat for job 7 is open -> Seen sent
+    let openChat = loggedIn { Model.initial with Screen = Chat 7; Jobs = [mkJob 7 "EnRoute"] }
+    runWith deps (HubMessageReceived incoming) openChat |> ignore
+    Assert.Equal(1, seen.Count)
+    // a different job's chat is open -> no Seen for job 7
+    let otherChat = loggedIn { Model.initial with Screen = Chat 9; Jobs = [mkJob 7 "EnRoute"] }
+    runWith deps (HubMessageReceived incoming) otherChat |> ignore
+    Assert.Equal(1, seen.Count)
+    // not in a chat at all -> still no Seen
+    let home = loggedIn { Model.initial with Screen = Home; Jobs = [mkJob 7 "EnRoute"] }
+    runWith deps (HubMessageReceived incoming) home |> ignore
+    Assert.Equal(1, seen.Count)
+
+[<Fact>]
+let ``auto-reply does not clear a draft being typed in another job's chat`` () =
+    let m0 =
+        loggedIn
+            { Model.initial with
+                AutoReply = true; Screen = Chat 9
+                Jobs = [mkJob 7 "EnRoute"; mkJob 9 "EnRoute"]
+                ChatDrafts = Map.ofList [ 9, "Running 10 min late" ] }
+    // auto-reply fires for job 7 while the user is composing in job 9
+    let m1 = up (AutoReplyDue 7) m0
+    let m2 = up (SendChatMessage (7, "On my way.", null)) m1
+    Assert.Equal("Running 10 min late", draftFor m2.ChatDrafts 9)
+
+[<Fact>]
+let ``auto-reply is dropped when toggled off during the delay`` () =
+    let m0 = loggedIn { Model.initial with AutoReply = false; Jobs = [mkJob 7 "EnRoute"] }
+    let m1 = up (AutoReplyDue 7) m0
+    Assert.Equal(0, m1.AutoRepliesSent)
+
+[<Fact>]
+let ``a stale typing-expiry timer does not clear an extended indicator`` () =
+    let m0 = loggedIn { Model.initial with Screen = Chat 7 }
+    let m1 = up (HubTyping (7, 1, "Customer")) m0        // token 1
+    let m2 = up (HubTyping (7, 1, "Customer")) m1        // token 2 extends the window
+    Assert.True(m2.CustomerTyping)
+    let m3 = up (CustomerTypingExpired 1) m2             // stale timer fires
+    Assert.True(m3.CustomerTyping)                       // still typing
+    let m4 = up (CustomerTypingExpired m2.TypingToken) m3
+    Assert.False(m4.CustomerTyping)
+
+[<Fact>]
+let ``navigating to Payment clears a previous job's receipt`` () =
+    let m0 =
+        loggedIn
+            { Model.initial with
+                Screen = Home; PaymentResult = Some { JobId = 3; Amount = 85m; Status = "Transferred" } }
+    let m1 = up (Navigate (Payment 7)) m0
+    Assert.Equal(None, m1.PaymentResult)
+
+[<Fact>]
+let ``a second Depart does not start a second GPS loop`` () =
+    let m0 = loggedIn { Model.initial with Screen = ActiveJob 7; UseRealGps = true; Jobs = [mkJob 7 "Scheduled"] }
+    let enroute = { mkJob 7 "EnRoute" with Id = 7 }
+    let m1 = up (JobActioned enroute) m0
+    Assert.True(m1.GpsLoopActive)
+    let m2 = up (JobActioned enroute) m1
+    Assert.True(m2.GpsLoopActive)   // still exactly one loop; guard prevents a second
