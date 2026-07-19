@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch makes an in-flight run obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.fsproj') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # NOTE: deliberately NOT `dotnet test FixItHere.Demo.slnx`.
+      # The solution includes Customer.Mobile and Provider.Mobile, whose
+      # net10.0-android / net10.0-ios target frameworks need a Java SDK and
+      # Xcode's actool. Building those here fails for reasons unrelated to the
+      # tests. All four test projects target plain net10.0 and reference only
+      # src/Shared and src/Backend.Api, so they need no MAUI workload.
+      - name: Restore
+        run: |
+          for p in tests/Shared.Tests tests/Backend.Api.Tests \
+                   tests/Customer.Mobile.Tests tests/Provider.Mobile.Tests; do
+            dotnet restore "$p"
+          done
+
+      - name: Shared (domain + state machine)
+        run: dotnet test tests/Shared.Tests -c Release --no-restore --logger "trx;LogFileName=shared.trx" --results-directory artifacts/tests
+
+      - name: Backend.Api (endpoint integration)
+        run: dotnet test tests/Backend.Api.Tests -c Release --no-restore --logger "trx;LogFileName=backend.trx" --results-directory artifacts/tests
+
+      - name: Customer.Mobile (MVU update)
+        run: dotnet test tests/Customer.Mobile.Tests -c Release --no-restore --logger "trx;LogFileName=customer.trx" --results-directory artifacts/tests
+
+      - name: Provider.Mobile (MVU update)
+        run: dotnet test tests/Provider.Mobile.Tests -c Release --no-restore --logger "trx;LogFileName=provider.trx" --results-directory artifacts/tests
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: artifacts/tests
+          if-no-files-found: ignore
+
+  # The test projects compile Domain/Update/Api but NOT Views/*.fs or
+  # MauiProgram.fs — those are only ever compiled by the app projects. Without
+  # this job a broken view ships green. Mac Catalyst is the plan's designated
+  # verification platform; android/ios are intentionally not built (see the
+  # note in the test job).
+  build-apps:
+    name: Build apps (Mac Catalyst)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+
+      - name: Build Customer.Mobile
+        run: dotnet build src/Customer.Mobile -f net10.0-maccatalyst -c Debug
+
+      - name: Build Provider.Mobile
+        run: dotnet build src/Provider.Mobile -f net10.0-maccatalyst -c Debug
