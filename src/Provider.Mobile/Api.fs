@@ -10,8 +10,8 @@ open FixItHere.Provider
 let createDepsWith
     (pickPhoto: unit -> Task<Result<string, string>>)
     (gpsLocation: unit -> Task<Result<float * float, string>>)
-    (sendTyping: int -> int -> unit)
-    (sendSeen: int -> int -> unit)
+    (sendTyping: int -> int -> string -> unit)
+    (sendSeen: int -> int -> string -> unit)
     (handler: HttpMessageHandler)
     (baseUrl: string) : ProviderApiDeps =
     let http = new HttpClient(handler, BaseAddress = Uri(baseUrl))

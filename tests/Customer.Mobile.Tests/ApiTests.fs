@@ -18,7 +18,7 @@ let stubPhoto () = Task.FromResult(Error "no photo in tests")
 let stubGps () = Task.FromResult(Ok (43.65, -79.38))
 
 let depsWith status json =
-    Api.createDepsWith stubPhoto stubGps (fun _ _ -> ()) (fun _ _ -> ()) (new StubHandler(status, json)) "http://stub"
+    Api.createDepsWith stubPhoto stubGps (fun _ _ _ -> ()) (fun _ _ _ -> ()) (new StubHandler(status, json)) "http://stub"
 
 [<Fact>]
 let ``success envelope maps to Ok`` () =

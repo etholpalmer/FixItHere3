@@ -3,7 +3,15 @@ namespace FixItHere.Provider
 open System.Threading.Tasks
 open FixItHere.Shared.Dtos
 
-type Session = { Token: string; UserId: int; DisplayName: string }
+/// Customer and Provider ids are independent sequences that both start at 1,
+/// so UserId alone is ambiguous — customer 1 and provider 1 are different
+/// actors. Role namespaces it; compare both, never the id on its own.
+type Session = { Token: string; UserId: int; Role: string; DisplayName: string }
+
+[<AutoOpen>]
+module Actor =
+    /// True when (id, role) identifies the same actor as the session.
+    let isSelf (s: Session) (id: int) (role: string) = id = s.UserId && role = s.Role
 
 type Screen =
     | Splash | Login | Home
@@ -90,8 +98,8 @@ type Msg =
     | HubMessageReceived of MessageDto
     | HubLocationUpdated of LocationDto
     | HubNotification of string
-    | HubTyping of jobId: int * senderId: int
-    | HubSeen of jobId: int * senderId: int
+    | HubTyping of jobId: int * senderId: int * senderRole: string
+    | HubSeen of jobId: int * senderId: int * senderRole: string
     | CustomerTypingExpired
     | DismissToast
     | DismissError
@@ -114,8 +122,8 @@ type ProviderApiDeps =
       StartDemo: int -> int -> Task<Result<JobDto, string>>   // customerId, providerId
       PickPhoto: unit -> Task<Result<string, string>>
       GetGpsLocation: unit -> Task<Result<float * float, string>>
-      SendTyping: int -> int -> unit
-      SendSeen: int -> int -> unit }
+      SendTyping: int -> int -> string -> unit
+      SendSeen: int -> int -> string -> unit }
 
 module Nav =
     let push (m: Model) (s: Screen) = { m with Screen = s; History = m.Screen :: m.History }
@@ -135,8 +143,14 @@ module Domain =
     /// True when an incoming hub chat message should trigger a canned auto-reply:
     /// auto-reply is enabled, the message isn't my own, and the sender is the
     /// customer on one of my jobs.
-    let shouldAutoReply (me: int option) (m: Model) (msg: MessageDto) : bool =
-        me <> Some msg.SenderId
+    ///
+    /// The sender must be matched on (id, role): a provider whose id happens to
+    /// equal the job's CustomerId is NOT the customer. Comparing ids alone made
+    /// this return false for every colliding pair (e.g. customer 1 + provider 1),
+    /// silently disabling auto-reply for the default demo pairing.
+    let shouldAutoReply (me: Session option) (m: Model) (msg: MessageDto) : bool =
+        msg.SenderRole = "Customer"
+        && (match me with Some s -> not (isSelf s msg.SenderId msg.SenderRole) | None -> false)
         && m.AutoReply
         && m.Jobs |> List.exists (fun j -> j.Id = msg.JobId && j.CustomerId = msg.SenderId)
 

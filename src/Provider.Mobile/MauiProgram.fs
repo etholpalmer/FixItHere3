@@ -50,14 +50,22 @@ let private updateWithHub (msg: Msg) (model: Model) =
     let m, cmd = Update.update deps msg model
     match msg with
     | LoggedIn _ when not hubStarted ->
-        hubStarted <- true
         let hubCmd =
             Cmd.ofSub (fun dispatch ->
-                hub.Start(
-                    (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
-                    (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
-                    (fun (j, s) -> dispatch (HubTyping (j, s))), (fun (j, s) -> dispatch (HubSeen (j, s))))
-                |> ignore)
+                task {
+                    try
+                        do! hub.Start(
+                                (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
+                                (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
+                                (fun (j, s, r) -> dispatch (HubTyping (j, s, r))),
+                                (fun (j, s, r) -> dispatch (HubSeen (j, s, r))))
+                        // Only latch once connected: WithAutomaticReconnect does not cover
+                        // the initial StartAsync, so latching before it succeeds would leave
+                        // the app permanently HTTP-only with no retry and no visible error.
+                        hubStarted <- true
+                    with ex ->
+                        dispatch (ApiError (sprintf "Realtime unavailable: %s" ex.Message))
+                } |> ignore)
         m, Cmd.batch [ cmd; hubCmd ]
     | _ -> m, cmd
 

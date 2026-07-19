@@ -3,7 +3,15 @@ namespace FixItHere.Customer
 open System.Threading.Tasks
 open FixItHere.Shared.Dtos
 
-type Session = { Token: string; UserId: int; DisplayName: string }
+/// Customer and Provider ids are independent sequences that both start at 1,
+/// so UserId alone is ambiguous — customer 1 and provider 1 are different
+/// actors. Role namespaces it; compare both, never the id on its own.
+type Session = { Token: string; UserId: int; Role: string; DisplayName: string }
+
+[<AutoOpen>]
+module Actor =
+    /// True when (id, role) identifies the same actor as the session.
+    let isSelf (s: Session) (id: int) (role: string) = id = s.UserId && role = s.Role
 
 type Screen =
     | Splash
@@ -86,8 +94,8 @@ type Msg =
     | HubMessageReceived of MessageDto
     | HubLocationUpdated of LocationDto
     | HubNotification of string
-    | HubTyping of jobId: int * senderId: int
-    | HubSeen of jobId: int * senderId: int
+    | HubTyping of jobId: int * senderId: int * senderRole: string
+    | HubSeen of jobId: int * senderId: int * senderRole: string
     | TypingExpired
     | TypingCooldownDone
     | StartDemo
@@ -111,8 +119,8 @@ type ApiDeps =
       // MAUI-implemented effects, injected like the HTTP calls so update stays pure:
       PickPhoto: unit -> Task<Result<string, string>>          // base64 jpeg/png ≤ ~100KB
       GetGpsLocation: unit -> Task<Result<float * float, string>>
-      SendTyping: int -> int -> unit
-      SendSeen: int -> int -> unit }
+      SendTyping: int -> int -> string -> unit
+      SendSeen: int -> int -> string -> unit }
 
 module Nav =
     let push (m: Model) (s: Screen) = { m with Screen = s; History = m.Screen :: m.History }

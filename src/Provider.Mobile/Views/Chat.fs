@@ -9,7 +9,7 @@ let view (model: Model) (jobId: int) =
     // Id of the most recent message I sent — the one the "✓✓ seen" marker attaches to.
     let lastMineId =
         jobMessages
-        |> List.filter (fun m -> model.Session |> Option.exists (fun s -> s.UserId = m.SenderId))
+        |> List.filter (fun m -> model.Session |> Option.exists (fun s -> isSelf s m.SenderId m.SenderRole))
         |> List.tryLast
         |> Option.map (fun m -> m.Id)
     (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto ]) {
@@ -20,7 +20,7 @@ let view (model: Model) (jobId: int) =
         (ScrollView(
             (VStack(spacing = 6.) {
                 for m in jobMessages do
-                    let mine = model.Session |> Option.exists (fun s -> s.UserId = m.SenderId)
+                    let mine = model.Session |> Option.exists (fun s -> isSelf s m.SenderId m.SenderRole)
                     let prefix = if mine then "You" else m.SenderName
                     let seenSuffix =
                         if mine && Some m.Id = lastMineId && model.CustomerSeen then " ✓✓ seen" else ""

@@ -49,14 +49,14 @@ let stubDeps : ProviderApiDeps =
       StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.70, -79.45))
-      SendTyping = fun _ _ -> ()
-      SendSeen = fun _ _ -> () }
+      SendTyping = fun _ _ _ -> ()
+      SendSeen = fun _ _ _ -> () }
 
 let up msg model = Update.update stubDeps msg model |> fst
 
 [<Fact>]
 let ``login lands Home with session`` () =
-    let resp = { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" }
+    let resp : LoginResponse = { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" }
     let m = up (LoggedIn resp) { Model.initial with Screen = Login }
     Assert.Equal(Home, m.Screen)
     Assert.Equal(Some 4, m.Session |> Option.map (fun s -> s.UserId))
@@ -83,12 +83,13 @@ let ``job actioned elsewhere just upserts`` () =
     Assert.Equal(ActiveJob 7, m.Screen)
     Assert.Equal("Arrived", (m.Jobs |> List.find (fun j -> j.Id = 7)).State)
 
-let mkChatMsg id jobId senderId : MessageDto =
-    { Id = id; JobId = jobId; SenderId = senderId; SenderName = "John"
+let mkChatMsg id jobId senderId senderRole : MessageDto =
+    { Id = id; JobId = jobId; SenderId = senderId; SenderRole = senderRole; SenderName = "John"
       Text = "hi"; PhotoBase64 = null; SentAt = ""; Seen = false }
 
-let loggedIn m =
-    { m with Model.Session = Some { Token = "t"; UserId = 4; DisplayName = "Elite HVAC" } }
+let mkSession userId = { Token = "t"; UserId = userId; Role = "Provider"; DisplayName = "Elite HVAC" }
+
+let loggedIn m = { m with Model.Session = Some (mkSession 4) }
 
 [<Fact>]
 let ``slider move sets slider start once and keeps it`` () =
@@ -118,20 +119,21 @@ let ``shouldAutoReply guards on autoReply flag, own-message, and job ownership``
     // calls the extracted pure predicate directly (no Cmd execution required),
     // unlike a test that merely discards the Cmd and checks unrelated state.
     let model = { Model.initial with AutoReply = true; Jobs = [mkJob 7 "EnRoute"] }
-    let customerMsg = mkChatMsg 10 7 1   // senderId 1 = job customer
-    Assert.True(shouldAutoReply (Some 4) model customerMsg)
-    Assert.False(shouldAutoReply (Some 4) model (mkChatMsg 11 7 4))                 // own message
-    Assert.False(shouldAutoReply (Some 4) { model with AutoReply = false } customerMsg) // disabled
-    Assert.False(shouldAutoReply (Some 4) model (mkChatMsg 12 99 1))                // not my job
+    let me = Some (mkSession 4)
+    let customerMsg = mkChatMsg 10 7 1 "Customer"   // senderId 1 = job customer
+    Assert.True(shouldAutoReply me model customerMsg)
+    Assert.False(shouldAutoReply me model (mkChatMsg 11 7 4 "Provider"))              // own message
+    Assert.False(shouldAutoReply me { model with AutoReply = false } customerMsg)     // disabled
+    Assert.False(shouldAutoReply me model (mkChatMsg 12 99 1 "Customer"))             // not my job
 
 [<Fact>]
 let ``own hub-echoed message appends once without duplicating`` () =
     let m0 = loggedIn { Model.initial with AutoReply = true; Screen = Chat 7; Jobs = [mkJob 7 "EnRoute"] }
-    let m1 = up (HubMessageReceived (mkChatMsg 10 7 4)) m0   // senderId 4 = me
+    let m1 = up (HubMessageReceived (mkChatMsg 10 7 4 "Provider")) m0   // senderId 4 = me
     Assert.Equal(1, m1.Messages |> List.filter (fun x -> x.Id = 10) |> List.length)
-    let m2 = up (HubMessageReceived (mkChatMsg 10 7 4)) m1   // duplicate echo
+    let m2 = up (HubMessageReceived (mkChatMsg 10 7 4 "Provider")) m1   // duplicate echo
     Assert.Equal(1, m2.Messages |> List.filter (fun x -> x.Id = 10) |> List.length)
-    Assert.False(shouldAutoReply (Some 4) m0 (mkChatMsg 10 7 4))   // own message never qualifies
+    Assert.False(shouldAutoReply (Some (mkSession 4)) m0 (mkChatMsg 10 7 4 "Provider"))
 
 [<Fact>]
 let ``typing cooldown blocks resend until done`` () =
@@ -144,14 +146,14 @@ let ``typing cooldown blocks resend until done`` () =
 [<Fact>]
 let ``hub typing shows indicator for open chat only`` () =
     let m0 = loggedIn { Model.initial with Screen = Chat 7 }
-    Assert.True((up (HubTyping (7, 1)) m0).CustomerTyping)
-    Assert.False((up (HubTyping (99, 1)) m0).CustomerTyping)
-    Assert.False((up CustomerTypingExpired (up (HubTyping (7, 1)) m0)).CustomerTyping)
+    Assert.True((up (HubTyping (7, 1, "Customer")) m0).CustomerTyping)
+    Assert.False((up (HubTyping (99, 1, "Customer")) m0).CustomerTyping)
+    Assert.False((up CustomerTypingExpired (up (HubTyping (7, 1, "Customer")) m0)).CustomerTyping)
 
 [<Fact>]
 let ``hub seen marks customer seen`` () =
     let m0 = loggedIn { Model.initial with Screen = Chat 7 }
-    Assert.True((up (HubSeen (7, 1)) m0).CustomerSeen)
+    Assert.True((up (HubSeen (7, 1, "Customer")) m0).CustomerSeen)
 
 [<Fact>]
 let ``rating submitted returns Home and resets`` () =
@@ -160,3 +162,40 @@ let ``rating submitted returns Home and resets`` () =
     Assert.Equal(Home, m.Screen)
     Assert.Empty(m.History)
     Assert.Equal(5, m.RatingStars)
+
+// ---------------------------------------------------------------------------
+// Identity collision regression tests.
+//
+// Customer and Provider ids are independent sequences that both start at 1, so
+// the documented demo pair is customer 1 (John) + provider 1 (Mike's Plumbing).
+// The pre-fix guards compared SenderId to Session.UserId as bare ints, so for
+// this pair every peer event looked like the provider's own: auto-reply never
+// fired, and the typing/seen indicators never appeared. The fixtures above use
+// provider 4 / customer 1, which cannot collide and so never caught it.
+// ---------------------------------------------------------------------------
+
+/// Provider id 1 — same integer as the job's customer id.
+let private collidingSession = { Token = "t"; UserId = 1; Role = "Provider"; DisplayName = "Mike's Plumbing" }
+let private collidingJob : JobDto =
+    { mkJob 7 "EnRoute" with CustomerId = 1; ProviderId = 1; ProviderName = "Mike's Plumbing" }
+
+[<Fact>]
+let ``auto-reply fires when customer id equals my provider id`` () =
+    let model = { Model.initial with AutoReply = true; Jobs = [collidingJob] }
+    let customerMsg = mkChatMsg 10 7 1 "Customer"   // customer 1 — same int as my provider id
+    Assert.True(shouldAutoReply (Some collidingSession) model customerMsg)
+
+[<Fact>]
+let ``my own message is not mistaken for the customer's when ids collide`` () =
+    let model = { Model.initial with AutoReply = true; Jobs = [collidingJob] }
+    let mine = mkChatMsg 11 7 1 "Provider"          // provider 1 — me
+    Assert.False(shouldAutoReply (Some collidingSession) model mine)
+
+[<Fact>]
+let ``typing and seen indicators show when customer id equals my provider id`` () =
+    let m0 = { Model.initial with Screen = Chat 7; Session = Some collidingSession; Jobs = [collidingJob] }
+    Assert.True((up (HubTyping (7, 1, "Customer")) m0).CustomerTyping)
+    Assert.True((up (HubSeen (7, 1, "Customer")) m0).CustomerSeen)
+    // my own echo must not trigger either indicator
+    Assert.False((up (HubTyping (7, 1, "Provider")) m0).CustomerTyping)
+    Assert.False((up (HubSeen (7, 1, "Provider")) m0).CustomerSeen)

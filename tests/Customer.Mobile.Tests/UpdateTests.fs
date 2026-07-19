@@ -47,11 +47,13 @@ let stubDeps : ApiDeps =
       StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.65, -79.38))
-      SendTyping = fun _ _ -> ()
-      SendSeen = fun _ _ -> () }
+      SendTyping = fun _ _ _ -> ()
+      SendSeen = fun _ _ _ -> () }
+
+let mkSession () : Session = { Token = "t"; UserId = 1; Role = "Customer"; DisplayName = "John" }
 
 let mkJob id state : JobDto =
-    { Id = id; CustomerId = 1; CustomerName = "John"; ProviderId = 2; ProviderName = "Mike's Plumbing"
+    { Id = id; CustomerId = 1; CustomerName = "John"; ProviderId = 1; ProviderName = "Mike's Plumbing"
       ServiceId = 3; ServiceName = "Plumbing"; State = state; Price = 85m
       ScheduledFor = "Now"; Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
@@ -63,11 +65,12 @@ let ``splash advances to Login`` () =
 
 [<Fact>]
 let ``login stores session and lands on Home with empty history`` () =
-    let resp = { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" }
+    let resp : LoginResponse = { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" }
     let m = up (LoggedIn resp) { Model.initial with Screen = Login }
     Assert.Equal(Home, m.Screen)
     Assert.Empty(m.History)
-    Assert.Equal(Some { Token = "fake-customer-1"; UserId = 1; DisplayName = "John" }, m.Session)
+    let expected : Session = { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" }
+    Assert.Equal(Some expected, m.Session)
 
 [<Fact>]
 let ``navigate pushes current screen`` () =
@@ -85,8 +88,11 @@ let ``job created goes to Tracking with job stored`` () =
 let ``api error sets banner`` () =
     Assert.Equal(Some "boom", (up (ApiError "boom") Model.initial).Error)
 
+/// From the provider. SenderId 1 deliberately collides with customer 1 — that is
+/// the real seed shape (Mike's Plumbing is provider 1, John is customer 1), and
+/// the pre-fix id-only comparisons mistook this for the customer's own message.
 let mkChatMsg id jobId : MessageDto =
-    { Id = id; JobId = jobId; SenderId = 2; SenderName = "Mike's Plumbing"
+    { Id = id; JobId = jobId; SenderId = 1; SenderRole = "Provider"; SenderName = "Mike's Plumbing"
       Text = "On my way"; PhotoBase64 = null; SentAt = "2026-01-01T00:00:00Z"; Seen = false }
 
 [<Fact>]
@@ -155,11 +161,11 @@ let ``set location updates model`` () =
 [<Fact>]
 let ``sixth photo for a job is rejected with an error`` () =
     let photoMsg id : MessageDto =
-        { Id = id; JobId = 7; SenderId = 1; SenderName = "John"
+        { Id = id; JobId = 7; SenderId = 1; SenderRole = "Customer"; SenderName = "John"
           Text = ""; PhotoBase64 = "ZmFrZQ=="; SentAt = ""; Seen = false }
     let m0 =
         { Model.initial with
-            Session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+            Session = Some (mkSession ())
             Screen = Chat 7
             Messages = [ for i in 1 .. 5 -> photoMsg i ] }
     let m = up (PickAndSendPhoto 7) m0
@@ -167,7 +173,7 @@ let ``sixth photo for a job is rejected with an error`` () =
 
 [<Fact>]
 let ``chat draft tracks input and clears on send`` () =
-    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let session = Some (mkSession ())
     let m1 = up (ChatDraftChanged "hello") { Model.initial with Session = session }
     Assert.Equal("hello", m1.ChatDraft)
     Assert.Equal("", (up (SendChatMessage (7, "hello", null)) m1).ChatDraft)
@@ -209,7 +215,7 @@ let ``disabling real GPS resets location to the seed default`` () =
 
 [<Fact>]
 let ``typing cooldown blocks resend until done`` () =
-    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let session = Some (mkSession ())
     let m0 = { Model.initial with Screen = Chat 7; Session = session }
     let m1 = up (ChatDraftChanged "h") m0
     Assert.True(m1.TypingCooldown)
@@ -218,17 +224,17 @@ let ``typing cooldown blocks resend until done`` () =
 
 [<Fact>]
 let ``hub typing shows indicator for open chat only`` () =
-    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let session = Some (mkSession ())
     let m0 = { Model.initial with Screen = Chat 7; Session = session }
-    Assert.True((up (HubTyping (7, 2)) m0).ProviderTyping)
-    Assert.False((up (HubTyping (99, 2)) m0).ProviderTyping)
-    Assert.False((up TypingExpired (up (HubTyping (7, 2)) m0)).ProviderTyping)
+    Assert.True((up (HubTyping (7, 1, "Provider")) m0).ProviderTyping)
+    Assert.False((up (HubTyping (99, 1, "Provider")) m0).ProviderTyping)
+    Assert.False((up TypingExpired (up (HubTyping (7, 1, "Provider")) m0)).ProviderTyping)
 
 [<Fact>]
 let ``hub seen marks messages seen`` () =
-    let session = Some { Token = "t"; UserId = 1; DisplayName = "John" }
+    let session = Some (mkSession ())
     let m0 = { Model.initial with Screen = Chat 7; Session = session }
-    Assert.True((up (HubSeen (7, 2)) m0).MessagesSeen)
+    Assert.True((up (HubSeen (7, 1, "Provider")) m0).MessagesSeen)
 
 [<Fact>]
 let ``start demo errors when not logged in`` () =

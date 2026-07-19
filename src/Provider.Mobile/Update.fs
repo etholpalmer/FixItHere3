@@ -25,7 +25,9 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | SplashDone -> { model with Screen = Login; History = [] }, Cmd.none
     | SelectProvider name -> model, apiCmd (fun () -> deps.Login name) LoggedIn
     | LoggedIn resp ->
-        let session = { Token = resp.Token; UserId = resp.UserId; DisplayName = resp.DisplayName }
+        // Session and LoginResponse now share a field set, so annotate explicitly.
+        let session : Session = { Token = resp.Token; UserId = resp.UserId
+                                  Role = resp.Role; DisplayName = resp.DisplayName }
         Nav.resetTo Home { model with Session = Some session },
         apiCmd (fun () -> deps.GetMyJobs resp.UserId) JobsLoaded
     | Navigate target ->
@@ -101,7 +103,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         | Chat jobId, Some s when not model.TypingCooldown ->
             { m with TypingCooldown = true },
             Cmd.batch
-                [ Cmd.ofSub (fun _ -> deps.SendTyping jobId s.UserId)
+                [ Cmd.ofSub (fun _ -> deps.SendTyping jobId s.UserId s.Role)
                   delayCmd 2000 TypingCooldownDone ]
         | _ -> m, Cmd.none
     | TypingCooldownDone -> { model with TypingCooldown = false }, Cmd.none
@@ -111,15 +113,19 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         | Some _ when System.String.IsNullOrWhiteSpace text && System.String.IsNullOrEmpty photo ->
             model, Cmd.none   // nothing to send
         | Some s ->
-            let req = { JobId = jobId; SenderId = s.UserId; Text = text; PhotoBase64 = photo }
+            let req = { JobId = jobId; SenderId = s.UserId; SenderRole = s.Role
+                        Text = text; PhotoBase64 = photo }
             { model with ChatDraft = "" }, apiCmd (fun () -> deps.SendMessage req) ChatMessageSent
     | PickAndSendPhoto jobId ->
         // Spec: at most 5 photos per job from this provider.
-        let myId = model.Session |> Option.map (fun s -> s.UserId)
+        let isMineMsg (m: FixItHere.Shared.Dtos.MessageDto) =
+            match model.Session with
+            | Some s -> isSelf s m.SenderId m.SenderRole
+            | None -> false
         let sentPhotos =
             model.Messages
             |> List.filter (fun m ->
-                m.JobId = jobId && Some m.SenderId = myId
+                m.JobId = jobId && isMineMsg m
                 && not (System.String.IsNullOrEmpty m.PhotoBase64))
             |> List.length
         if sentPhotos >= 5 then
@@ -179,9 +185,11 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             else job :: model.Jobs
         { model with Jobs = jobs }, Cmd.none
     | HubMessageReceived m2 ->
-        let me = model.Session |> Option.map (fun s -> s.UserId)
         let activeChatJob = match model.Screen with Chat id -> Some id | ActiveJob id -> Some id | _ -> None
-        let isMine = me = Some m2.SenderId
+        let isMine =
+            match model.Session with
+            | Some s -> isSelf s m2.SenderId m2.SenderRole
+            | None -> false
         let append =
             activeChatJob = Some m2.JobId
             && not (model.Messages |> List.exists (fun x -> x.Id = m2.Id))
@@ -190,23 +198,23 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             [ // mark seen if I'm looking at this chat and it's not my own message
               match model.Screen, model.Session with
               | Chat id, Some s when id = m2.JobId && not isMine ->
-                  Cmd.ofSub (fun _ -> deps.SendSeen m2.JobId s.UserId)
+                  Cmd.ofSub (fun _ -> deps.SendSeen m2.JobId s.UserId s.Role)
               | _ -> Cmd.none
               // auto-reply to the customer's message on one of my jobs
-              if shouldAutoReply me model m2 then
+              if shouldAutoReply model.Session model m2 then
                   delayCmd 5000 (AutoReplyDue m2.JobId)
               else Cmd.none ]
         m, Cmd.batch cmds
     | HubLocationUpdated _ -> model, Cmd.none
     | HubNotification text -> { model with Toast = Some text }, Cmd.none
-    | HubTyping (jobId, senderId) ->
+    | HubTyping (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
-        | Chat id, Some s when id = jobId && senderId <> s.UserId ->
+        | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
             { model with CustomerTyping = true }, delayCmd 3000 CustomerTypingExpired
         | _ -> model, Cmd.none
-    | HubSeen (jobId, senderId) ->
+    | HubSeen (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
-        | Chat id, Some s when id = jobId && senderId <> s.UserId ->
+        | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
             { model with CustomerSeen = true }, Cmd.none
         | _ -> model, Cmd.none
     | CustomerTypingExpired -> { model with CustomerTyping = false }, Cmd.none

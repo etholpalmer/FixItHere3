@@ -74,7 +74,7 @@ let run (db: AppDb) =
           Stars = 3 + rng.Next(0, 3); Comment = comments.[rng.Next(comments.Length)] })) |> ignore
 
     db.Messages.AddRange(doneJobs |> List.truncate 20 |> List.map (fun j ->
-        { Id = 0; JobId = j.Id; SenderId = j.CustomerId
+        { Id = 0; JobId = j.Id; SenderId = j.CustomerId; SenderRole = "Customer"
           Text = "Hi, see you soon!"; PhotoBase64 = null
           SentAt = Epoch; Seen = true })) |> ignore
     db.SaveChanges() |> ignore

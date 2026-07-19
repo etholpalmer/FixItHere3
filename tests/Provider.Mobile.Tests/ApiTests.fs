@@ -18,7 +18,7 @@ let depsWith status json =
     Api.createDepsWith
         (fun () -> Task.FromResult(Error "no photo"))
         (fun () -> Task.FromResult(Ok (43.70, -79.45)))
-        (fun _ _ -> ()) (fun _ _ -> ())
+        (fun _ _ _ -> ()) (fun _ _ _ -> ())
         (new StubHandler(status, json)) "http://stub"
 
 [<Fact>]

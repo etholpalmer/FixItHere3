@@ -35,14 +35,17 @@ type CreateJobRequest =
     { CustomerId: int; ProviderId: int; ServiceId: int
       ScheduleChoice: string; Lat: float; Lng: float; Address: string }
 
+/// Customer and Provider ids are independent sequences that both start at 1,
+/// so a bare SenderId is ambiguous — customer 1 and provider 1 are different
+/// actors. Every identity that crosses an app boundary carries its role.
 [<CLIMutable>]
 type MessageDto =
-    { Id: int; JobId: int; SenderId: int; SenderName: string
+    { Id: int; JobId: int; SenderId: int; SenderRole: string; SenderName: string
       Text: string; PhotoBase64: string; SentAt: string; Seen: bool }
 
 [<CLIMutable>]
 type SendMessageRequest =
-    { JobId: int; SenderId: int; Text: string; PhotoBase64: string }
+    { JobId: int; SenderId: int; SenderRole: string; Text: string; PhotoBase64: string }
 
 [<CLIMutable>]
 type RatingDto =

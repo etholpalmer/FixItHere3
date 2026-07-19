@@ -22,7 +22,7 @@ type Job =
 
 [<CLIMutable>]
 type Message =
-    { Id: int; JobId: int; SenderId: int; Text: string
+    { Id: int; JobId: int; SenderId: int; SenderRole: string; Text: string
       PhotoBase64: string; SentAt: string; Seen: bool }
 
 [<CLIMutable>]

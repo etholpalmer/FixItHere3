@@ -129,29 +129,43 @@ let mapAll (app: WebApplication) =
     app.MapGet("/messages", Func<AppDb, int, IResult>(fun db jobId ->
         okJson (db.Messages.Where(fun m -> m.JobId = jobId).OrderBy(fun m -> m.Id)
                 |> Seq.map (fun m ->
+                    // Resolve by role: customer and provider ids overlap (both 1..N),
+                    // so a lookup that tried Customers first would shadow every provider.
                     let sender =
-                        db.Customers.SingleOrDefault(fun c -> c.Id = m.SenderId) |> Option.ofObj
-                        |> Option.map (fun c -> c.Name)
-                        |> Option.defaultWith (fun () ->
+                        if m.SenderRole = "Provider" then
                             db.Providers.SingleOrDefault(fun p -> p.Id = m.SenderId) |> Option.ofObj
                             |> Option.map (fun p -> p.BusinessName)
-                            |> Option.defaultValue "Unknown")
-                    { Id = m.Id; JobId = m.JobId; SenderId = m.SenderId; SenderName = sender
+                            |> Option.defaultValue "Unknown"
+                        else
+                            db.Customers.SingleOrDefault(fun c -> c.Id = m.SenderId) |> Option.ofObj
+                            |> Option.map (fun c -> c.Name)
+                            |> Option.defaultValue "Unknown"
+                    { Id = m.Id; JobId = m.JobId; SenderId = m.SenderId
+                      SenderRole = m.SenderRole; SenderName = sender
                       Text = m.Text; PhotoBase64 = m.PhotoBase64; SentAt = m.SentAt; Seen = m.Seen })
                 |> List.ofSeq))) |> ignore
 
     app.MapPost("/messages", Func<SendMessageRequest, AppDb, IBroadcaster, System.Threading.Tasks.Task<IResult>>(
         fun req db hub -> task {
+            let senderRole = if req.SenderRole = "Provider" then "Provider" else "Customer"
             let msg =
-                { Id = 0; JobId = req.JobId; SenderId = req.SenderId
+                { Id = 0; JobId = req.JobId; SenderId = req.SenderId; SenderRole = senderRole
                   Text = req.Text; PhotoBase64 = req.PhotoBase64
                   SentAt = FixItHere.Backend.Seed.Epoch; Seen = false }
             db.Messages.Add msg |> ignore
             db.SaveChanges() |> ignore
             let saved = db.Messages.OrderByDescending(fun m -> m.Id).First()
+            let senderName =
+                if senderRole = "Provider" then
+                    db.Providers.SingleOrDefault(fun p -> p.Id = saved.SenderId) |> Option.ofObj
+                    |> Option.map (fun p -> p.BusinessName) |> Option.defaultValue "Unknown"
+                else
+                    db.Customers.SingleOrDefault(fun c -> c.Id = saved.SenderId) |> Option.ofObj
+                    |> Option.map (fun c -> c.Name) |> Option.defaultValue "Unknown"
             let dto =
                 { Id = saved.Id; JobId = saved.JobId; SenderId = saved.SenderId
-                  SenderName = ""; Text = saved.Text; PhotoBase64 = saved.PhotoBase64
+                  SenderRole = saved.SenderRole; SenderName = senderName
+                  Text = saved.Text; PhotoBase64 = saved.PhotoBase64
                   SentAt = saved.SentAt; Seen = saved.Seen }
             do! hub.MessageReceived dto
             return okJson dto })) |> ignore

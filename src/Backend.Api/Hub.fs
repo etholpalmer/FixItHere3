@@ -9,10 +9,11 @@ open FixItHere.Backend.Services
 
 type DemoHub() =
     inherit Hub()
-    member this.SendTyping(jobId: int, senderId: int) : Task =
-        this.Clients.Others.SendAsync("Typing", jobId, senderId)
-    member this.SendSeen(jobId: int, senderId: int) : Task =
-        this.Clients.Others.SendAsync("Seen", jobId, senderId)
+    // senderRole disambiguates the id: customer 1 and provider 1 are different actors.
+    member this.SendTyping(jobId: int, senderId: int, senderRole: string) : Task =
+        this.Clients.Others.SendAsync("Typing", jobId, senderId, senderRole)
+    member this.SendSeen(jobId: int, senderId: int, senderRole: string) : Task =
+        this.Clients.Others.SendAsync("Seen", jobId, senderId, senderRole)
 
 type SignalRBroadcaster(ctx: IHubContext<DemoHub>) =
     interface IBroadcaster with

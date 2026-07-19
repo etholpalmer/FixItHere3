@@ -49,12 +49,14 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
                       UpdatedAt = FixItHere.Backend.Seed.Epoch }
             if i = 2 then
                 do! hub.MessageReceived
-                        { Id = 0; JobId = jobId; SenderId = job.CustomerId; SenderName = "Customer"
+                        { Id = 0; JobId = jobId; SenderId = job.CustomerId
+                          SenderRole = "Customer"; SenderName = "Customer"
                           Text = "Hi!"; PhotoBase64 = null
                           SentAt = FixItHere.Backend.Seed.Epoch; Seen = false }
             if i = 3 then
                 do! hub.MessageReceived
-                        { Id = 0; JobId = jobId; SenderId = job.ProviderId; SenderName = "Provider"
+                        { Id = 0; JobId = jobId; SenderId = job.ProviderId
+                          SenderRole = "Provider"; SenderName = "Provider"
                           Text = "On my way."; PhotoBase64 = null
                           SentAt = FixItHere.Backend.Seed.Epoch; Seen = false }
         do! pause ()
