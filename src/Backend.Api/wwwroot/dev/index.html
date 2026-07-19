@@ -1,107 +1,724 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>FixItHere Demo Control Panel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FixItHere · Demo control</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; display: grid;
-         grid-template-columns: 340px 1fr 320px; height: 100vh; }
-  .col { padding: 12px; overflow-y: auto; border-right: 1px solid #ddd; }
-  h1 { font-size: 16px; margin: 0 0 12px; }
-  h2 { font-size: 13px; text-transform: uppercase; color: #666; margin: 16px 0 6px; }
-  button { margin: 2px; padding: 4px 10px; cursor: pointer; }
-  #map { height: 100%; }
-  .job { border: 1px solid #ccc; border-radius: 6px; padding: 6px; margin: 4px 0; font-size: 12px; }
-  .job b { font-size: 13px; }
-  #log { font-size: 11px; font-family: monospace; white-space: pre-wrap; }
-  .big { font-size: 15px; padding: 8px 14px; font-weight: 600; }
-  select, input { margin: 2px; padding: 4px; }
+/* ---------------------------------------------------------------------------
+   Demo control console.
+
+   The operator drives this while talking, often with the laptop mirrored to a
+   TV in a lit room. Two consequences shape everything below: midtones vanish
+   under a projector, so contrast is functional rather than decorative; and the
+   map is the only thing the audience actually watches, so the chrome is a dark
+   instrument surround that lets the bright map and the live data carry the eye.
+--------------------------------------------------------------------------- */
+:root {
+  /* Surfaces — true neutral (chroma 0). Warmth belongs to the brand, not the bg. */
+  --bg:         oklch(0.12 0 0);
+  --surface:    oklch(0.165 0 0);
+  --surface-2:  oklch(0.215 0 0);
+  --line:       oklch(0.28 0 0);
+  --line-soft:  oklch(0.23 0 0);
+
+  /* Text — faint brand warmth at very low chroma. ink/bg ≈ 16:1. */
+  --ink:        oklch(0.97 0.006 85);
+  --muted:      oklch(0.72 0.012 85);
+  /* L raised from 0.56 to clear 4.5:1 on --surface — at 0.56 the helper hints,
+     log timestamps and placeholders measured 4.14 and failed AA. */
+  --faint:      oklch(0.63 0.012 85);
+
+  /* Brand: honey. Light fill, so it takes dark text. */
+  --brand:      oklch(0.78 0.15 80);
+  --brand-dim:  oklch(0.62 0.12 80);
+  --on-brand:   oklch(0.16 0.02 80);
+
+  /* Job pipeline. Each state also carries its label — never colour alone. */
+  --st-scheduled:  oklch(0.70 0.02 85);
+  --st-enroute:    oklch(0.78 0.15 80);
+  --st-arrived:    oklch(0.76 0.11 200);
+  --st-inprogress: oklch(0.72 0.13 250);
+  --st-completed:  oklch(0.75 0.15 150);
+  --st-closed:     oklch(0.55 0.01 85);
+  --st-cancelled:  oklch(0.68 0.19 25);
+
+  --ok:     oklch(0.75 0.15 150);
+  --danger: oklch(0.68 0.19 25);
+
+  /* Fixed rem scale, ratio ~1.15. Product UI, not fluid brand type. */
+  --t-xs:   0.6875rem;
+  --t-sm:   0.8125rem;
+  --t-base: 0.875rem;
+  --t-md:   1rem;
+  --t-lg:   1.25rem;
+
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --fast: 140ms;
+  --med:  220ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --z-map: 1;
+  --z-chrome: 10;
+  --z-toast: 40;
+
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: var(--t-base)/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  z-index: var(--z-chrome);
+}
+
+.brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+
+.brand-mark {
+  width: 30px; height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  background: var(--brand);
+  color: var(--on-brand);
+  font-weight: 700;
+  font-size: var(--t-base);
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: var(--t-md);
+  font-weight: 650;
+  letter-spacing: -0.011em;
+  line-height: 1.2;
+}
+
+.brand p { margin: 0; font-size: var(--t-xs); color: var(--faint); }
+
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+
+/* Connection state. Dot + word, so it survives being read at a distance. */
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--t-xs);
+  white-space: nowrap;
+}
+
+.conn-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: none;
+}
+
+.conn[data-state="up"]   { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 35%, var(--line)); }
+.conn[data-state="up"]   .conn-dot { background: var(--ok); animation: pulse 2.4s var(--ease) infinite; }
+.conn[data-state="wait"] { color: var(--brand); }
+.conn[data-state="wait"] .conn-dot { background: var(--brand); animation: pulse 1s var(--ease) infinite; }
+.conn[data-state="down"] { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 35%, var(--line)); }
+.conn[data-state="down"] .conn-dot { background: var(--danger); }
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ---------- buttons ---------- */
+
+button {
+  font: 500 var(--t-sm)/1 var(--sans);
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease),
+              border-color var(--fast) var(--ease),
+              transform var(--fast) var(--ease);
+}
+
+button:hover:not(:disabled) { background: oklch(0.26 0 0); border-color: oklch(0.34 0 0); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+:where(button, select, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) {
+  background: oklch(0.83 0.15 80);
+  border-color: oklch(0.83 0.15 80);
+}
+
+.btn-wide { width: 100%; }
+
+/* ---------- layout ---------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr) 350px;
+  min-height: 0;
+}
+
+.rail, .side {
+  background: var(--surface);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rail { border-right: 1px solid var(--line); overflow-y: auto; }
+.side { border-left: 1px solid var(--line); }
+
+.rail section { padding: 16px 18px; border-bottom: 1px solid var(--line-soft); }
+.rail section:last-child { border-bottom: 0; }
+
+/* Sentence-case headings with weight contrast — deliberately not the
+   tracked all-caps eyebrow that every dashboard reaches for. */
+h2 {
+  margin: 0 0 12px;
+  font-size: var(--t-sm);
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+h2 .count { font-weight: 500; font-size: var(--t-xs); color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* ---------- form controls ---------- */
+
+.field { margin-bottom: 10px; }
+.field:last-child { margin-bottom: 0; }
+
+label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+
+select, input[type="text"] {
+  width: 100%;
+  font: var(--t-sm)/1.4 var(--sans);
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  transition: border-color var(--fast) var(--ease);
+}
+
+select:hover, input[type="text"]:hover { border-color: oklch(0.36 0 0); }
+input::placeholder { color: var(--faint); }
+
+.row { display: flex; gap: 8px; }
+.row > * { flex: 1; min-width: 0; }
+.row--tight { gap: 6px; }
+
+.hint { margin: 8px 0 0; font-size: var(--t-xs); color: var(--faint); }
+
+/* ---------- map ---------- */
+
+.mapwrap { position: relative; min-height: 0; background: var(--bg); }
+
+#map {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-map);
+  background: var(--bg);
+}
+
+.maphint {
+  position: absolute;
+  left: 12px; bottom: 12px;
+  z-index: var(--z-chrome);
+  margin: 0;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--bg) 82%, transparent);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--t-xs);
+  pointer-events: none;
+}
+
+/* Provider pin: brand dot, dark ring so it reads on light tiles. */
+.pin {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--brand);
+  border: 2.5px solid oklch(0.18 0 0);
+  box-shadow: 0 1px 6px oklch(0.12 0 0 / 0.55);
+}
+
+.leaflet-container { background: var(--bg); font-family: var(--sans); }
+
+/* ---------- jobs ---------- */
+
+.jobs-panel, .log-panel { display: flex; flex-direction: column; min-height: 0; }
+.jobs-panel { flex: 1 1 55%; padding: 16px 16px 0; border-bottom: 1px solid var(--line); }
+.log-panel  { flex: 1 1 45%; padding: 16px 16px 0; }
+
+.scroll { overflow-y: auto; min-height: 0; padding-bottom: 16px; }
+
+.job {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  padding: 11px 12px;
+  margin-bottom: 8px;
+}
+
+.job-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.job-id {
+  font: 600 var(--t-xs)/1 var(--mono);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.job-price { margin-left: auto; font-size: var(--t-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.job-parties { font-size: var(--t-sm); color: var(--ink); margin-bottom: 2px; }
+.job-parties .arrow { color: var(--faint); margin: 0 5px; }
+.job-svc { font-size: var(--t-xs); color: var(--muted); margin-bottom: 9px; }
+
+/* Leading dot, not a side stripe. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--pill) 16%, transparent);
+  border: 1px solid color-mix(in oklch, var(--pill) 32%, transparent);
+  color: var(--pill);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--pill);
+  flex: none;
+}
+
+.pill { --pill: var(--st-scheduled); }
+.pill[data-state="EnRoute"]    { --pill: var(--st-enroute); }
+.pill[data-state="Arrived"]    { --pill: var(--st-arrived); }
+.pill[data-state="InProgress"] { --pill: var(--st-inprogress); }
+.pill[data-state="Completed"]  { --pill: var(--st-completed); }
+.pill[data-state="Closed"]     { --pill: var(--st-closed); }
+.pill[data-state="Cancelled"]  { --pill: var(--st-cancelled); }
+
+.transitions { display: flex; flex-wrap: wrap; gap: 5px; }
+.transitions button { padding: 5px 9px; font-size: var(--t-xs); }
+
+.empty {
+  padding: 18px 4px;
+  color: var(--faint);
+  font-size: var(--t-sm);
+  line-height: 1.6;
+}
+
+/* ---------- event log ---------- */
+
+#log { display: flex; flex-direction: column; gap: 1px; }
+
+.ev {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 5px 2px;
+  font-size: var(--t-xs);
+  border-bottom: 1px solid var(--line-soft);
+  animation: enter var(--med) var(--ease);
+}
+
+@keyframes enter { from { opacity: 0; transform: translateY(-3px); } }
+
+.ev time { font-family: var(--mono); color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.ev-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); align-self: center; }
+.ev-msg { color: var(--muted); overflow-wrap: anywhere; }
+
+.ev[data-kind="job"]   .ev-dot { background: var(--brand); }
+.ev[data-kind="job"]   .ev-msg { color: var(--ink); }
+.ev[data-kind="msg"]   .ev-dot { background: var(--st-inprogress); }
+.ev[data-kind="loc"]   .ev-dot { background: var(--st-arrived); }
+.ev[data-kind="note"]  .ev-dot { background: var(--ok); }
+.ev[data-kind="error"] .ev-dot { background: var(--danger); }
+.ev[data-kind="error"] .ev-msg { color: var(--danger); }
+
+/* ---------- responsive: structural, not fluid ---------- */
+
+@media (max-width: 1180px) {
+  body { overflow: auto; }
+  .layout { grid-template-columns: 290px minmax(0, 1fr); grid-template-rows: 62vh auto; }
+  .mapwrap { min-height: 340px; }
+  .side {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    flex-direction: row;
+  }
+  .jobs-panel { border-bottom: 0; border-right: 1px solid var(--line); }
+  .jobs-panel, .log-panel { flex: 1 1 50%; max-height: 380px; }
+}
+
+@media (max-width: 760px) {
+  .layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 52vh auto; }
+  .rail { border-right: 0; border-bottom: 1px solid var(--line); }
+  .side { flex-direction: column; }
+  .jobs-panel { border-right: 0; border-bottom: 1px solid var(--line); }
+  .topbar { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 </style>
 </head>
 <body>
-<div class="col">
-  <h1>FixItHere Demo Control Panel</h1>
-  <button class="big" onclick="startDemo()">&#9654; Start Demo</button>
-  <button class="big" onclick="resetDemo()">&#8635; Reset Demo</button>
-  <h2>Personas</h2>
-  Customer <select id="customer"></select><br>
-  Provider <select id="provider"></select>
-  <h2>Create Job</h2>
-  <button onclick="createJob()">Create job (customer &rarr; provider)</button>
-  <h2>Inject Message</h2>
-  <input id="msgJobId" placeholder="job id" size="6">
-  <input id="msgText" placeholder="text" size="18">
-  <button onclick="injectMsg(true)">as Customer</button>
-  <button onclick="injectMsg(false)">as Provider</button>
-  <h2>Payment</h2>
-  <input id="payJobId" placeholder="job id" size="6">
-  <button onclick="simulatePayment()">Force Payment</button>
-  <h2>Jobs (non-terminal)</h2>
-  <div id="jobs"></div>
-</div>
-<div id="map"></div>
-<div class="col">
-  <h2>Live Events</h2>
-  <div id="log"></div>
-</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">F</span>
+    <div>
+      <h1>FixItHere</h1>
+      <p>Demo control</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="conn" id="conn" data-state="wait" role="status">
+      <span class="conn-dot" aria-hidden="true"></span><span id="connText">Connecting</span>
+    </span>
+    <button class="btn-primary" id="btnStartDemo">Start demo</button>
+    <button id="btnReset">Reset</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <aside class="rail" aria-label="Controls">
+    <section>
+      <h2>Personas</h2>
+      <div class="field">
+        <label for="customer">Customer</label>
+        <select id="customer"></select>
+      </div>
+      <div class="field">
+        <label for="provider">Provider</label>
+        <select id="provider"></select>
+      </div>
+      <p class="hint">Used for new jobs, demo runs, and map moves.</p>
+    </section>
+
+    <section>
+      <h2>Create job</h2>
+      <button class="btn-wide" id="btnCreateJob">Book selected provider</button>
+    </section>
+
+    <section>
+      <h2>Inject message</h2>
+      <div class="field">
+        <label for="msgJobId">Job</label>
+        <input type="text" id="msgJobId" inputmode="numeric" placeholder="Job id">
+      </div>
+      <div class="field">
+        <label for="msgText">Message</label>
+        <input type="text" id="msgText" placeholder="Text to send">
+      </div>
+      <div class="row row--tight">
+        <button id="btnMsgCustomer">As customer</button>
+        <button id="btnMsgProvider">As provider</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Payment</h2>
+      <div class="field">
+        <label for="payJobId">Job</label>
+        <input type="text" id="payJobId" inputmode="numeric" placeholder="Job id">
+      </div>
+      <button class="btn-wide" id="btnPay">Force payment</button>
+    </section>
+  </aside>
+
+  <section class="mapwrap" aria-label="Provider map">
+    <div id="map"></div>
+    <p class="maphint">Click the map to move the selected provider</p>
+  </section>
+
+  <aside class="side" aria-label="Live state">
+    <section class="jobs-panel">
+      <h2>Active jobs <span class="count" id="jobCount"></span></h2>
+      <div class="scroll" id="jobs"></div>
+    </section>
+    <section class="log-panel">
+      <h2>Events</h2>
+      <div class="scroll" id="log" role="log" aria-live="polite" aria-label="Live events"></div>
+    </section>
+  </aside>
+
+</main>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/@microsoft/signalr@8.0.0/dist/browser/signalr.min.js"></script>
 <script>
+const $ = (id) => document.getElementById(id);
+const MAX_EVENTS = 200;
+
 const api = async (method, path, body) => {
-  const resp = await fetch(path, {
-    method, headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined });
-  const env = await resp.json();
-  if (!env.success) log(`ERR ${path}: ${env.error}`);
-  return env.data;
-};
-const log = (msg) => {
-  const el = document.getElementById("log");
-  el.textContent = new Date().toLocaleTimeString() + "  " + msg + "\n" + el.textContent;
+  try {
+    const resp = await fetch(path, {
+      method, headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined });
+    const env = await resp.json();
+    if (!env.success) { log(`${path} — ${env.error}`, "error"); return null; }
+    return env.data;
+  } catch (e) {
+    log(`${path} — ${e.message}`, "error");
+    return null;
+  }
 };
 
+/* Built as DOM nodes rather than concatenated HTML: server-supplied names and
+   message text land as text, never as markup. */
+function log(msg, kind = "note") {
+  const el = $("log");
+  const row = document.createElement("div");
+  row.className = "ev";
+  row.dataset.kind = kind;
+
+  const t = document.createElement("time");
+  const now = new Date();
+  t.dateTime = now.toISOString();
+  t.textContent = now.toLocaleTimeString();
+
+  const dot = document.createElement("span");
+  dot.className = "ev-dot";
+  dot.setAttribute("aria-hidden", "true");
+
+  const text = document.createElement("span");
+  text.className = "ev-msg";
+  text.textContent = msg;
+
+  row.append(t, dot, text);
+  el.prepend(row);
+  while (el.childElementCount > MAX_EVENTS) el.lastElementChild.remove();
+}
+
+function setConn(state, text) {
+  $("conn").dataset.state = state;
+  $("connText").textContent = text;
+}
+
 // --- map ---
-const map = L.map("map").setView([43.7, -79.45], 10);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-  { attribution: "&copy; OpenStreetMap" }).addTo(map);
+const map = L.map("map", { zoomControl: true }).setView([43.7, -79.45], 10);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "&copy; OpenStreetMap", maxZoom: 19
+}).addTo(map);
+
+const pinIcon = L.divIcon({ className: "", html: '<div class="pin"></div>', iconSize: [15, 15], iconAnchor: [7, 7] });
 const providerMarkers = {};
+
 map.on("click", async (e) => {
-  const pid = parseInt(document.getElementById("provider").value);
+  const pid = parseInt($("provider").value, 10);
+  if (!pid) return;
   await api("PUT", "/location", { providerId: pid, lat: e.latlng.lat, lng: e.latlng.lng });
-  log(`Moved provider ${pid} to ${e.latlng.lat.toFixed(4)},${e.latlng.lng.toFixed(4)}`);
+  log(`Moved provider ${pid} to ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`, "loc");
 });
+
+// --- rendering ---
+const TRANSITIONS = ["accept", "enroute", "arrive", "start", "complete", "cancel"];
+
+/* The seed leaves ~56 non-terminal jobs. Rendering all of them buries the one
+   being demoed and costs a keyboard user 340+ tab stops to cross the panel, so
+   only the newest few are shown and the remainder is stated rather than hidden. */
+const VISIBLE_JOBS = 12;
+
+function renderJobs(jobs) {
+  const host = $("jobs");
+  host.textContent = "";
+  $("jobCount").textContent = jobs.length ? `${jobs.length}` : "";
+
+  const shown = jobs.slice(0, VISIBLE_JOBS);
+  const hidden = jobs.length - shown.length;
+
+  if (!jobs.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No active jobs. Book a provider, or press Start demo to run the scripted flow.";
+    host.append(empty);
+    return;
+  }
+
+  for (const j of shown) {
+    const card = document.createElement("article");
+    card.className = "job";
+
+    const head = document.createElement("div");
+    head.className = "job-head";
+
+    const id = document.createElement("span");
+    id.className = "job-id";
+    id.textContent = `#${j.id}`;
+
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.dataset.state = j.state;
+    pill.textContent = j.state;
+
+    const price = document.createElement("span");
+    price.className = "job-price";
+    price.textContent = `$${j.price}`;
+
+    head.append(id, pill, price);
+
+    const parties = document.createElement("div");
+    parties.className = "job-parties";
+    const cust = document.createElement("span");
+    cust.textContent = j.customerName;
+    const arrow = document.createElement("span");
+    arrow.className = "arrow";
+    arrow.textContent = "→";
+    const prov = document.createElement("span");
+    prov.textContent = j.providerName;
+    parties.append(cust, arrow, prov);
+
+    const svc = document.createElement("div");
+    svc.className = "job-svc";
+    svc.textContent = j.serviceName;
+
+    const acts = document.createElement("div");
+    acts.className = "transitions";
+    for (const t of TRANSITIONS) {
+      const b = document.createElement("button");
+      b.textContent = t;
+      b.setAttribute("aria-label", `${t} job ${j.id}`);
+      b.addEventListener("click", () => transition(j.id, t));
+      acts.append(b);
+    }
+
+    card.append(head, parties, svc, acts);
+    host.append(card);
+  }
+
+  if (hidden > 0) {
+    const more = document.createElement("p");
+    more.className = "empty";
+    more.textContent = `${hidden} older active job${hidden === 1 ? "" : "s"} not shown — newest first.`;
+    host.append(more);
+  }
+}
 
 // --- data loading ---
 async function refresh() {
   const provs = await api("GET", "/providers");
-  const provSel = document.getElementById("provider");
-  provSel.innerHTML = provs.map(p =>
-    `<option value="${p.id}">${p.businessName} (${p.serviceName})</option>`).join("");
-  provs.forEach(p => {
-    if (!providerMarkers[p.id])
-      providerMarkers[p.id] = L.marker([p.lat, p.lng]).addTo(map)
-        .bindPopup(p.businessName);
-    else providerMarkers[p.id].setLatLng([p.lat, p.lng]);
-  });
-  // fake-login list uses seeded customers; named five are guaranteed present
-  const custSel = document.getElementById("customer");
-  custSel.innerHTML = "";
-  for (const name of ["John","Mary","Steve","Susan","Bob"]) {
-    const u = await api("POST", "/login", { role: "Customer", name });
-    if (u) custSel.innerHTML += `<option value="${u.userId}">${u.displayName}</option>`;
+  if (provs) {
+    const sel = $("provider");
+    const keep = sel.value;
+    sel.textContent = "";
+    for (const p of provs) {
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = `${p.businessName} · ${p.serviceName}`;
+      sel.append(o);
+      if (!providerMarkers[p.id]) {
+        // alt/title label the marker: Leaflet makes markers keyboard-focusable,
+        // and without one they announce as bare, unnamed elements.
+        providerMarkers[p.id] = L.marker([p.lat, p.lng], {
+            icon: pinIcon, alt: p.businessName, title: p.businessName })
+          .addTo(map).bindPopup(p.businessName);
+      } else {
+        providerMarkers[p.id].setLatLng([p.lat, p.lng]);
+      }
+    }
+    if (keep) sel.value = keep;
+  }
+
+  // Seeded customers; the named five are guaranteed present.
+  const sel = $("customer");
+  if (!sel.childElementCount) {
+    for (const name of ["John", "Mary", "Steve", "Susan", "Bob"]) {
+      const u = await api("POST", "/login", { role: "Customer", name });
+      if (u) {
+        const o = document.createElement("option");
+        o.value = u.userId;
+        o.textContent = u.displayName;
+        sel.append(o);
+      }
+    }
   }
   await refreshJobs();
 }
+
 async function refreshJobs() {
   const jobs = await api("GET", "/jobs");
-  const active = jobs.filter(j => !["Closed","Cancelled"].includes(j.state));
-  document.getElementById("jobs").innerHTML = active.map(j => `
-    <div class="job"><b>#${j.id}</b> ${j.customerName} &rarr; ${j.providerName}
-      [${j.serviceName}] <b>${j.state}</b> $${j.price}<br>
-      ${["accept","enroute","arrive","start","complete","cancel"].map(t =>
-        `<button onclick="transition(${j.id},'${t}')">${t}</button>`).join("")}
-    </div>`).join("");
+  if (!jobs) return;
+  // Newest first: the seed leaves ~56 non-terminal jobs, so the one the operator
+  // just created (or Start demo just spun up) would otherwise be last in the list.
+  const active = jobs
+    .filter(j => !["Closed", "Cancelled"].includes(j.state))
+    .sort((a, b) => b.id - a.id);
+  renderJobs(active);
 }
 
 // --- actions ---
@@ -109,54 +726,99 @@ async function transition(id, t) {
   await api("PUT", `/jobs/${id}/${t}`);
   await refreshJobs();
 }
+
 async function createJob() {
-  const customerId = parseInt(document.getElementById("customer").value);
-  const providerId = parseInt(document.getElementById("provider").value);
+  const customerId = parseInt($("customer").value, 10);
+  const providerId = parseInt($("provider").value, 10);
   const provs = await api("GET", "/providers");
-  const p = provs.find(x => x.id === providerId);
-  await api("POST", "/jobs", { customerId, providerId, serviceId: p.serviceId,
+  const p = provs && provs.find(x => x.id === providerId);
+  if (!p) return;
+  await api("POST", "/jobs", {
+    customerId, providerId, serviceId: p.serviceId,
     scheduleChoice: "Now", lat: 43.65, lng: -79.38, address: "1 Demo St" });
   await refreshJobs();
 }
+
+/* senderRole is required: customer and provider ids are independent sequences
+   that both start at 1, so the id alone cannot say who sent this. Omitting it
+   made every injected message resolve to the customer. */
 async function injectMsg(asCustomer) {
-  const jobId = parseInt(document.getElementById("msgJobId").value);
+  const jobId = parseInt($("msgJobId").value, 10);
+  if (!jobId) { log("Enter a job id first", "error"); return; }
   const job = await api("GET", `/jobs/${jobId}`);
-  await api("POST", "/messages", { jobId,
+  if (!job) return;
+  const text = $("msgText").value;
+  if (!text.trim()) { log("Enter message text first", "error"); return; }
+  await api("POST", "/messages", {
+    jobId,
     senderId: asCustomer ? job.customerId : job.providerId,
-    text: document.getElementById("msgText").value, photoBase64: null });
+    senderRole: asCustomer ? "Customer" : "Provider",
+    text, photoBase64: null });
+  $("msgText").value = "";
 }
+
 async function simulatePayment() {
-  const jobId = parseInt(document.getElementById("payJobId").value);
+  const jobId = parseInt($("payJobId").value, 10);
+  if (!jobId) { log("Enter a job id first", "error"); return; }
   const r = await api("POST", "/payment/simulate", { jobId });
-  if (r) log(`Payment: $${r.amount} ${r.status}`);
+  if (r) log(`Payment $${r.amount} — ${r.status}`, "note");
 }
+
 async function startDemo() {
-  const customerId = parseInt(document.getElementById("customer").value);
-  const providerId = parseInt(document.getElementById("provider").value);
+  const customerId = parseInt($("customer").value, 10);
+  const providerId = parseInt($("provider").value, 10);
   const job = await api("POST", "/dev/demo/start", { customerId, providerId });
-  if (job) log(`Demo started with job #${job.id}`);
+  if (job) log(`Demo started — job #${job.id}`, "job");
 }
+
 async function resetDemo() {
   await api("POST", "/dev/reset");
-  log("Demo reset");
+  log("Demo reset to seed", "note");
+  $("customer").textContent = "";
   await refresh();
 }
 
+$("btnStartDemo").addEventListener("click", startDemo);
+$("btnReset").addEventListener("click", resetDemo);
+$("btnCreateJob").addEventListener("click", createJob);
+$("btnMsgCustomer").addEventListener("click", () => injectMsg(true));
+$("btnMsgProvider").addEventListener("click", () => injectMsg(false));
+$("btnPay").addEventListener("click", simulatePayment);
+
 // --- realtime ---
-const conn = new signalR.HubConnectionBuilder().withUrl("/hub").build();
-conn.on("JobUpdated", j => { log(`Job #${j.id} -> ${j.state}`); refreshJobs(); });
-conn.on("MessageReceived", m => log(`Msg [job ${m.jobId}] ${m.senderName}: ${m.text}`));
+const conn = new signalR.HubConnectionBuilder()
+  .withUrl("/hub").withAutomaticReconnect().build();
+
+conn.on("JobUpdated", j => { log(`Job #${j.id} → ${j.state}`, "job"); refreshJobs(); });
+conn.on("MessageReceived", m => log(`#${m.jobId} ${m.senderName}: ${m.text}`, "msg"));
 conn.on("LocationUpdated", l => {
-  log(`Provider ${l.providerId} @ ${l.lat.toFixed(4)},${l.lng.toFixed(4)}`);
+  log(`Provider ${l.providerId} @ ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}`, "loc");
   if (providerMarkers[l.providerId]) providerMarkers[l.providerId].setLatLng([l.lat, l.lng]);
 });
-conn.on("Notification", t => log(`[notify] ${t}`));
-conn.start().then(() => log("SignalR connected"));
+conn.on("Notification", t => log(t, "note"));
+conn.on("ProviderUpdated", p => {
+  log(`${p.businessName} is ${p.online ? "online" : "offline"}`, "note");
+  if (providerMarkers[p.id]) providerMarkers[p.id].setLatLng([p.lat, p.lng]);
+});
+
+conn.onreconnecting(() => setConn("wait", "Reconnecting"));
+conn.onreconnected(() => { setConn("up", "Live"); refresh(); });
+conn.onclose(() => setConn("down", "Disconnected"));
+
+conn.start()
+  .then(() => { setConn("up", "Live"); log("Realtime connected", "note"); })
+  .catch(e => { setConn("down", "Disconnected"); log(`Realtime failed — ${e.message}`, "error"); });
 
 refresh();
-// Leaflet renders tiles for the container's initial size; force a recalc once laid out.
-window.addEventListener("load", () => setTimeout(() => map.invalidateSize(), 200));
-setTimeout(() => map.invalidateSize(), 500);
+
+/* Leaflet sizes its tile grid to the container's layout at init. The panel
+   changes width at both breakpoints, so observe the container rather than
+   guessing with timeouts. */
+let sizeTimer;
+new ResizeObserver(() => {
+  clearTimeout(sizeTimer);
+  sizeTimer = setTimeout(() => map.invalidateSize(), 100);
+}).observe(document.getElementById("map"));
 </script>
 </body>
 </html>
