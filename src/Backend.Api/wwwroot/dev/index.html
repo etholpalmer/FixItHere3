@@ -499,6 +499,18 @@ input::placeholder { color: var(--faint); }
       </div>
       <button class="btn-wide" id="btnPay">Force payment</button>
     </section>
+
+    <section>
+      <h2>Route</h2>
+      <p class="hint">Walks the selected provider along the route to the newest active job (<span id="routeTarget">none yet</span>).</p>
+      <div class="row row--tight" id="routeButtons">
+        <button data-pct="0">0%</button>
+        <button data-pct="25">25%</button>
+        <button data-pct="50">50%</button>
+        <button data-pct="75">75%</button>
+        <button data-pct="100">100%</button>
+      </div>
+    </section>
   </aside>
 
   <section class="mapwrap" aria-label="Provider map">
@@ -578,6 +590,10 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const pinIcon = L.divIcon({ className: "", html: '<div class="pin"></div>', iconSize: [15, 15], iconAnchor: [7, 7] });
 const providerMarkers = {};
+
+// Newest active job, kept in sync by refreshJobs() — the route buttons walk
+// the selected provider toward this job's location.
+let topActiveJob = null;
 
 map.on("click", async (e) => {
   const pid = parseInt($("provider").value, 10);
@@ -719,6 +735,11 @@ async function refreshJobs() {
     .filter(j => !["Closed", "Cancelled"].includes(j.state))
     .sort((a, b) => b.id - a.id);
   renderJobs(active);
+
+  topActiveJob = active[0] || null;
+  $("routeTarget").textContent = topActiveJob
+    ? `#${topActiveJob.id} ${topActiveJob.serviceName}`
+    : "none yet";
 }
 
 // --- actions ---
@@ -764,6 +785,48 @@ async function simulatePayment() {
   if (r) log(`Payment $${r.amount} — ${r.status}`, "note");
 }
 
+/* Mirrors FixItHere.Provider.Domain Slider.position: linear interpolation from
+   the leg's ORIGIN toward the target, pct clamped to [0, 1]. */
+function routePosition(start, target, pct) {
+  const p = Math.max(0, Math.min(1, pct));
+  return {
+    lat: start.lat + (target.lat - start.lat) * p,
+    lng: start.lng + (target.lng - start.lng) * p
+  };
+}
+
+/* The origin must be LATCHED, exactly as Provider.Update latches SliderStart.
+   Interpolating from the provider's *current* position instead makes the
+   percentages relative rather than absolute: 50% then 25% would move the
+   provider further along rather than back, and repeated presses would converge
+   on the target without ever arriving. Keyed by provider+job so switching
+   either starts a fresh leg. */
+let routeLeg = null;   // { key, start: {lat, lng} }
+
+function legOrigin(pid, job, marker) {
+  const key = `${pid}:${job.id}`;
+  if (!routeLeg || routeLeg.key !== key) {
+    const p = marker.getLatLng();
+    routeLeg = { key, start: { lat: p.lat, lng: p.lng } };
+  }
+  return routeLeg.start;
+}
+
+async function moveAlongRoute(pct) {
+  const pid = parseInt($("provider").value, 10);
+  if (!pid) { log("Select a provider first", "error"); return; }
+  if (!topActiveJob) { log("No active job to route to", "error"); return; }
+  const marker = providerMarkers[pid];
+  if (!marker) { log("Provider position unknown", "error"); return; }
+
+  const start = legOrigin(pid, topActiveJob, marker);
+  const target = { lat: topActiveJob.lat, lng: topActiveJob.lng };
+  const next = routePosition(start, target, pct / 100);
+
+  await api("PUT", "/location", { providerId: pid, lat: next.lat, lng: next.lng });
+  log(`Routed provider ${pid} to ${pct}% toward job #${topActiveJob.id} (${next.lat.toFixed(4)}, ${next.lng.toFixed(4)})`, "loc");
+}
+
 async function startDemo() {
   const customerId = parseInt($("customer").value, 10);
   const providerId = parseInt($("provider").value, 10);
@@ -784,6 +847,9 @@ $("btnCreateJob").addEventListener("click", createJob);
 $("btnMsgCustomer").addEventListener("click", () => injectMsg(true));
 $("btnMsgProvider").addEventListener("click", () => injectMsg(false));
 $("btnPay").addEventListener("click", simulatePayment);
+document.querySelectorAll("#routeButtons button").forEach(b => {
+  b.addEventListener("click", () => moveAlongRoute(parseInt(b.dataset.pct, 10)));
+});
 
 // --- realtime ---
 const conn = new signalR.HubConnectionBuilder()

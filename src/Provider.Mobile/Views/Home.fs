@@ -25,5 +25,4 @@ let view (model: Model) =
                        Navigate (JobDetail j.Id))
         else
             Label("Go Online to see available jobs")
-        Button("Developer Settings", Navigate DevSettings)
     }).padding(24.)

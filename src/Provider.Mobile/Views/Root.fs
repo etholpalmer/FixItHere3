@@ -14,7 +14,6 @@ let private screenView (model: Model) =
     | Chat id -> AnyView(Chat.view model id)
     | Payment id -> AnyView(Payment.view model id)
     | RateCustomer id -> AnyView(RateCustomer.view model id)
-    | DevSettings -> AnyView(DevSettings.view model)
 
 let view (model: Model) =
     Application(

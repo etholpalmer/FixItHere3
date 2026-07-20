@@ -26,7 +26,6 @@ type Screen =
     | Chat of jobId: int
     | Payment of jobId: int
     | RateCustomer of jobId: int
-    | DevSettings
 
 type Model =
     { Screen: Screen
@@ -93,6 +92,9 @@ type Msg =
     | GpsTick of jobId: int
     | GpsFetched of jobId: int * lat: float * lng: float
     | LocationPushed of LocationDto
+    /// No longer reachable from the UI. The /dev console's route walk performs
+    /// the same interpolation but PUTs /location directly, bypassing this Msg —
+    /// so the two implementations must stay in step (see Slider.position below).
     | SliderMoved of pct: float
     | MessagesLoaded of MessageDto list
     | ChatDraftChanged of jobId: int * text: string
@@ -100,6 +102,10 @@ type Msg =
     | SendChatMessage of jobId: int * text: string * photoBase64: string
     | PickAndSendPhoto of jobId: int
     | ChatMessageSent of MessageDto
+    /// No longer reachable from the UI — the Auto-Reply switch was removed from
+    /// provider Chat as demo scaffolding, and no /dev control replaces it yet, so
+    /// AutoReply stays false for the whole session. Retained because the handlers
+    /// carry the regression tests for the customer/provider id-collision fix.
     | AutoReplyToggled of bool
     | AutoReplyDue of jobId: int
     | PaymentDelayDone of jobId: int
@@ -110,6 +116,8 @@ type Msg =
     | RatingSubmitted
     | StartFakeCall
     | EndFakeCall
+    /// No longer reachable from the UI (see the note on SliderMoved). The /dev
+    /// console drives provider position via PUT /location, not via these.
     | SetLocation of lat: float * lng: float
     | SetUseRealGps of bool
     | StartDemo

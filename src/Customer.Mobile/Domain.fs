@@ -31,7 +31,6 @@ type Screen =
     | Chat of jobId: int
     | Payment of jobId: int
     | Rating of jobId: int
-    | DevSettings
 
 type Model =
     { Screen: Screen
@@ -102,6 +101,11 @@ type Msg =
     | RatingSubmitted
     | StartFakeCall
     | EndFakeCall
+    /// No longer reachable from the UI — the DevSettings screen that raised
+    /// these was removed as demo scaffolding. Deliberately retained rather than
+    /// deleted: the capability may return via an operator channel, and the
+    /// handlers carry regression coverage. There is currently no /dev control
+    /// that dispatches them.
     | SetLocation of lat: float * lng: float
     | SetUseRealGps of bool
     | HubJobUpdated of JobDto
@@ -113,6 +117,8 @@ type Msg =
     | HubSeen of jobId: int * senderId: int * senderRole: string
     | TypingExpired of token: int
     | TypingCooldownDone
+    /// No longer reachable from the UI. The /dev console has its own Start Demo,
+    /// but it POSTs /dev/demo/start directly rather than dispatching this.
     | StartDemo
     | DismissToast
     | DismissError

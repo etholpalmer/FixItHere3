@@ -12,7 +12,7 @@ let view (model: Model) (jobId: int) =
         |> List.filter (fun m -> model.Session |> Option.exists (fun s -> isSelf s m.SenderId m.SenderRole))
         |> List.tryLast
         |> Option.map (fun m -> m.Id)
-    (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto ]) {
+    (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto ]) {
         (VStack(spacing = 4.) {
             Button("← Back", GoBack)
             Label("Chat").font(size = 22.)
@@ -35,12 +35,8 @@ let view (model: Model) (jobId: int) =
             })
         )).gridRow(1)
         (HStack(spacing = 8.) {
-            Label("Auto-Reply")
-            Switch(model.AutoReply, AutoReplyToggled)
-        }).gridRow(2)
-        (HStack(spacing = 8.) {
             Entry(draftFor model.ChatDrafts jobId, fun t -> ChatDraftChanged (jobId, t))
             Button("Send", SendChatMessage (jobId, draftFor model.ChatDrafts jobId, null))
             Button("📷", PickAndSendPhoto jobId)
-        }).gridRow(3)
+        }).gridRow(2)
     }).padding(12.)

@@ -16,5 +16,4 @@ let view (model: Model) =
         for j in model.Jobs |> List.filter nonTerminal do
             Button(sprintf "#%d %s — %s (%s)" j.Id j.ServiceName j.ProviderName j.State,
                    Navigate (Tracking j.Id))
-        Button("Developer Settings", Navigate DevSettings)
     }).padding(24.)

@@ -12,8 +12,8 @@ let mkJob id state : JobDto =
 
 [<Fact>]
 let ``nav push and back mirror customer app`` () =
-    let m = Nav.push { Model.initial with Screen = Home } DevSettings
-    Assert.Equal(DevSettings, m.Screen)
+    let m = Nav.push { Model.initial with Screen = Home } (Payment 1)
+    Assert.Equal(Payment 1, m.Screen)
     Assert.Equal(Home, (Nav.back m).Screen)
 
 [<Fact>]
