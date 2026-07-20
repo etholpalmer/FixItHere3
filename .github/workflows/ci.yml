@@ -94,11 +94,23 @@ jobs:
       - name: Find a usable Xcode
         id: xcode
         run: |
+          # The probe must be the EXACT call the MacCatalyst targets make:
+          # xcodebuild with the SDK as an explicit path. `xcrun --sdk macosx`
+          # resolves by NAME and false-passed on an install whose SDK directory
+          # exists but is not registered — the build then failed with
+          # "SDK cannot be located" against the very same path.
+          probe() {
+            "$1/Contents/Developer/usr/bin/xcodebuild" \
+              -sdk "$1/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" \
+              -find actool >/dev/null 2>&1
+          }
           usable=""
           for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V); do
-            sudo xcode-select -s "$app/Contents/Developer"
-            if xcrun --sdk macosx --find actool >/dev/null 2>&1; then
+            if probe "$app"; then
+              echo "probe PASS: $app"
               usable="$app"   # keep the newest that passes; loop continues
+            else
+              echo "probe fail: $app"
             fi
           done
           if [ -z "$usable" ]; then
@@ -108,7 +120,8 @@ jobs:
             if [ -n "$newest" ]; then
               sudo xcode-select -s "$newest/Contents/Developer"
               sudo xcodebuild -runFirstLaunch || true
-              if xcrun --sdk macosx --find actool >/dev/null 2>&1; then
+              if probe "$newest"; then
+                echo "probe PASS after runFirstLaunch: $newest"
                 usable="$newest"
               fi
             fi
