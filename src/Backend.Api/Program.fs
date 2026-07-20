@@ -34,6 +34,10 @@ FixItHere.Backend.Endpoints.mapAll app
 
 if app.Environment.IsDevelopment() then
     FixItHere.Backend.DevEndpoints.mapAll app
+    // "/" must land somewhere: a bare 404 renders as a solid black page in a
+    // dark-mode browser, and the root URL is every natural entry point (typing
+    // host:port, preview tools' default tab). Send it to the console.
+    app.MapGet("/", Func<IResult>(fun () -> Results.Redirect "/dev/index.html")) |> ignore
     app.MapGet("/dev", Func<IResult>(fun () -> Results.Redirect "/dev/index.html")) |> ignore
     app.UseStaticFiles() |> ignore   // serves wwwroot/dev
 
