@@ -76,9 +76,11 @@ jobs:
 
   # The test projects compile Domain/Update/Api but NOT Views/*.fs or
   # MauiProgram.fs — those are only ever compiled by the app projects. Without
-  # this job a broken view ships green. Mac Catalyst is the plan's designated
-  # verification platform; android/ios are intentionally not built (see the
-  # note in the test job).
+  # this job a broken view ships green.
+  #
+  # Targets net10.0-ios: Mac Catalyst was dropped 2026-07-20 and the demo now
+  # runs on the iOS Simulator.
+  #
   # This job's history, kept because it explains the unusual shape below. Four
   # gating strategies failed against the hosted image before this one:
   # version selection, SDK-directory existence, an xcrun name-resolution probe,
@@ -91,7 +93,7 @@ jobs:
   # a real code failure and gates. No continue-on-error — when the image
   # works, a broken view blocks the merge, which is this job's whole purpose.
   build-apps:
-    name: Build apps (Mac Catalyst)
+    name: Build apps (iOS)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +101,9 @@ jobs:
       - name: Find a usable Xcode
         id: xcode
         run: |
-          # The probe must be the EXACT call the MacCatalyst targets make:
+          # A cheap pre-check only — we established no probe can actually predict
+          # the MSBuild-context failure, so the build step below classifies instead.
+          # Modelled on the call the Apple targets make:
           # xcodebuild with the SDK as an explicit path. `xcrun --sdk macosx`
           # resolves by NAME and false-passed on an install whose SDK directory
           # exists but is not registered — the build then failed with
@@ -136,7 +140,7 @@ jobs:
             xcodebuild -version
             echo "usable=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice title=Mac Catalyst build skipped::No Xcode on this image passes the explicit-path 'xcodebuild -sdk ... -find actool' probe. This is a runner-image defect, not a code failure. The build will gate again automatically once the image ships a usable Xcode."
+            echo "::notice title=iOS build skipped::No Xcode on this image passes the explicit-path 'xcodebuild -sdk ... -find actool' probe. This is a runner-image defect, not a code failure. The build will gate again automatically once the image ships a usable Xcode."
             echo "usable=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -151,7 +155,7 @@ jobs:
 
       # Prediction failed twice: every Xcode on the image passes the exact
       # `xcodebuild -sdk <path> -find actool` call in a plain step, and the very
-      # same call fails with "SDK cannot be located" when the MacCatalyst
+      # same call fails with "SDK cannot be located" when the Apple
       # targets invoke it under MSBuild. The failure is a property of the build
       # environment, not the install — so no pre-flight probe can gate it.
       # Instead: build, and classify the outcome. Known environment signatures
@@ -165,13 +169,13 @@ jobs:
           status=0
           for proj in src/Customer.Mobile src/Provider.Mobile; do
             log="/tmp/build-$(basename "$proj").log"
-            if ! dotnet build "$proj" -f net10.0-maccatalyst -c Debug 2>&1 | tee "$log"; then
+            if ! dotnet build "$proj" -f net10.0-ios -c Debug 2>&1 | tee "$log"; then
               status=1
             fi
           done
           [ $status -eq 0 ] && exit 0
           if grep -qE 'SDK ".*MacOSX\.sdk" cannot be located|requires Xcode|unable to find utility "actool"' /tmp/build-*.log; then
-            echo "::notice title=Mac Catalyst build skipped::xcodebuild cannot resolve the macOS SDK when invoked under MSBuild on this runner image, though the same call succeeds standalone. Known image/toolchain defect, not a code failure — this job gates again automatically once the image works."
+            echo "::notice title=iOS build skipped::xcodebuild cannot resolve the macOS SDK when invoked under MSBuild on this runner image, though the same call succeeds standalone. Known image/toolchain defect, not a code failure — this job gates again automatically once the image works."
             exit 0
           fi
           exit 1

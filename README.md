@@ -15,10 +15,12 @@ book → accept → travel → chat → arrive → work → pay → rate flow, l
 Every startup resets the database to identical seed data
 (7 services, 20 customers, 20 providers, 80 jobs, ratings, messages).
 
-## Run the Customer app (Mac Catalyst)
+## Run the Customer app (iOS Simulator)
 
 ```bash
-dotnet build -t:Run -f net10.0-maccatalyst src/Customer.Mobile
+# Boot a simulator once, then build and run onto it:
+xcrun simctl boot "iPhone 17 Pro" && open -a Simulator
+dotnet build -t:Run -f net10.0-ios src/Customer.Mobile
 ```
 
 Requires the backend running (above). Log in as John/Mary/Steve/Susan/Bob.
@@ -27,10 +29,14 @@ Start Demo there for the fully scripted flow.
 
 Android emulator: the app auto-targets http://10.0.2.2:5162.
 
-## Run the Provider app (Mac Catalyst)
+## Run the Provider app (iOS Simulator)
+
+Run this on a *second* simulator so both apps are visible side by side — that
+pairing is the demo.
 
 ```bash
-dotnet build -t:Run -f net10.0-maccatalyst src/Provider.Mobile
+xcrun simctl boot "iPhone 17" && open -a Simulator
+dotnet build -t:Run -f net10.0-ios src/Provider.Mobile
 ```
 
 Requires the backend running (above). Log in as one of:
