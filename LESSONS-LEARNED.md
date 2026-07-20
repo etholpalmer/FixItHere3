@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-19 (identity namespacing, review remediation, CI, console redesign)
+- **Last Updated:** 2026-07-20 (CI build-then-classify redesign)
 
 ---
 
@@ -239,7 +239,52 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 
 ---
 
+### 2026-07-20 — Environment-dependent failures cannot be gated by pre-flight probes; build, then classify
+
+**Insight:** When a failure is a property of the *caller's environment* rather than of the artifact being checked, no pre-flight probe can predict it — the probe necessarily runs in a different context than the real call. The durable design is to run the real operation and classify its outcome afterwards: known environmental signatures skip loudly with exit 0, anything else gates.
+
+**Discovery:** Four successive gating strategies for the Mac Catalyst CI job failed, each refuted by its own run:
+
+| Attempt | Strategy | Refuting evidence |
+|---|---|---|
+| 1 | pick newest Xcode by version | 26.6 selected, build errors — version isn't the axis |
+| 2 | require `MacOSX.sdk` directory to exist | directory exists, xcodebuild still refuses — existence ≠ registration |
+| 3 | probe via `xcrun --sdk macosx --find actool` | name resolution false-passes on a half-registered install |
+| 4 | probe via the **exact** explicit-path xcodebuild call | **all fifteen installs pass in a plain step; the identical call fails under MSBuild** |
+
+Attempt 4 (run 29717135645) is the decisive one: same command, same shell session, same selected Xcode — succeeds standalone, dies inside `dotnet build` with `SDK "…MacOSX.sdk" cannot be located` (actool exit 72). The env-var hypothesis was then also refuted by evidence: `SDKROOT`/`DEVELOPER_DIR`/`MD_APPLE_*` are all unset in the failing build step, so the mechanism is something subtler in MSBuild's invocation context. It remains unidentified — acceptably, because the final design no longer depends on knowing it.
+
+**Design intent:** each probe was an attempt to keep the job honest — skip when the environment can't build, gate when it can. The intent was right; the assumption that usability is a checkable property of the Xcode install was wrong one layer down.
+
+**Impact:** generalises to any CI gate wrapping a toolchain it doesn't control: probing "will X work?" duplicates X's own resolution logic and will eventually diverge from it. Running X and pattern-matching the failure is simpler and cannot drift.
+
+**Active mitigation:** [.github/workflows/ci.yml](.github/workflows/ci.yml) — the build step tees logs, greps for the three known signatures (`SDK "…" cannot be located` / `requires Xcode` / `unable to find utility "actool"`), emits a `::notice::` annotation and exits 0 on match, exits 1 otherwise. `continue-on-error` is gone, so a real view-code failure gates again. Verified live: run 29717326198 is green with the skip annotation while its underlying build failed with the environment signature.
+
+**Related:** [Mistake: an unverified probe justified removing the safety net](#2026-07-20--an-unverified-probe-justified-removing-continue-on-error-and-turned-green-runs-red), [Gap: the Mac Catalyst CI job cannot be a required check](#2026-07-19--the-mac-catalyst-ci-job-cannot-be-a-required-check)
+
+---
+
 ## Mistakes & Fixes
+
+### 2026-07-20 — An unverified probe justified removing continue-on-error, and turned green runs red
+
+**Symptom:** After shipping the probe-gated design (`acadb57`), run 29716960025 went **red at the run level** — worse than the status quo, where the advisory job failed inside a green run.
+
+**Attempted:** The probe (`xcrun --sdk macosx --find actool`) had been validated only on a machine where builds already worked. On the runner it false-passed a half-registered Xcode, so the build ran, failed as always — and with `continue-on-error` removed on the strength of that probe, the failure now failed the whole run. The false pass also meant the `runFirstLaunch` repair path never executed at all.
+
+**Root Cause:** two layers. Immediate: the probe resolved the SDK by *name* while the build resolves it by *explicit path* — a fidelity gap. Structural: `continue-on-error` was removed based on a prediction that had never been observed correct in the failing environment. The safety net came off before the new mechanism had ever caught anything.
+
+**Fix:** the exact-call probe (`ab32dee`) closed the fidelity gap — and was then itself refuted (every install passes standalone, the same call fails under MSBuild), which forced the real fix: build-then-classify (`e328b88`). See the companion lesson.
+
+**Prevention:** never remove a safety mechanism in the same change that introduces its replacement, when the replacement has only been validated where the failure doesn't occur. Land the new mechanism, observe it working in the hostile environment once, then remove the net.
+
+**Time Lost:** three CI round-trips (~40 minutes wall clock).
+
+**Severity:** Medium — no code was wrong, but the branch's CI signal regressed from "green with a confusing red job" to "red", which is precisely the misleading state the work set out to eliminate.
+
+**Related:** [Lesson: environment-dependent failures cannot be gated by pre-flight probes](#2026-07-20--environment-dependent-failures-cannot-be-gated-by-pre-flight-probes-build-then-classify)
+
+---
 
 ### 2026-07-19 — The /dev console was left behind when identity was namespaced
 
@@ -491,16 +536,16 @@ This is a recurring pattern anywhere an optional (`Nullable<'T>`) minimal-API qu
 
 **Current State:** [.github/workflows/ci.yml](.github/workflows/ci.yml) builds both apps for `net10.0-maccatalyst` on `macos-latest`, marked `continue-on-error: true`. The Tests job on ubuntu is the real gate and passes (96 tests, run 29680507369).
 
-**Limitation:** The job cannot currently succeed on the hosted image, and the reason is a genuine bind rather than a misconfiguration. `Microsoft.MacCatalyst.Sdk` 26.5.10301 requires **Xcode 26.6**; the image's Xcode 26.5 is complete but too old, while its Xcode 26.6 install is **missing the MacOSX platform SDK** (`MacOSX.sdk cannot be located`, surfacing confusingly as `unable to find utility "actool"`). There is no Xcode on the image that is both new enough and complete.
+**Limitation:** The job cannot currently succeed on the hosted image, and the reason is a genuine bind rather than a misconfiguration. `Microsoft.MacCatalyst.Sdk` 26.5.10301 requires **Xcode 26.6**, and while the image's 26.6 passes every standalone check — same Build 17F113 as a working local install, SDK present, exact-call probe green — the identical xcodebuild invocation fails with `SDK cannot be located` **when run under MSBuild**. **Updated 2026-07-20:** the earlier "missing platform SDK" diagnosis was an approximation; the failure is context-dependent, not install-dependent, which is why every install-inspection strategy failed (see the build-then-classify lesson).
 
 **Why it still earns its place:** the test projects compile `Domain`/`Update`/`Api` but never `Views/*.fs` or `MauiProgram.fs`. This job is the only thing that would catch a broken view, and views were edited repeatedly during this work.
 
 **Closing this gap requires:**
-1. Wait for the runner image to ship a complete Xcode ≥26.6, then drop `continue-on-error` — no work, just time — pending
-2. Or pin the MacCatalyst workload to a version matching the image's complete Xcode — an hour, and re-pins on every SDK bump — pending
+1. Wait for the image/toolchain combination to work — the build-then-classify design detects this automatically: the first run whose builds succeed simply gates, with no workflow change needed — pending, zero work ✅ (mechanism shipped in `e328b88`)
+2. Or pin the MacCatalyst workload to a version matching a working Xcode on the image — an hour, and re-pins on every SDK bump — pending
 3. Or self-host a macOS runner with a known-good Xcode — half a day plus ongoing maintenance — pending
 
-**Active mitigation:** the workflow now selects the newest Xcode that actually contains a MacOSX SDK, so when this does fail it fails with the honest version-requirement error rather than a misleading missing-`actool` one.
+**Active mitigation:** `continue-on-error` is gone. The job builds and classifies: environment-signature failures annotate and exit 0 (verified live — run 29717326198 is green with the skip notice over a failed underlying build); any other failure gates, so a broken view blocks the merge the moment the image starts working.
 
 **Priority:** Medium — the gap is real coverage, but the local `dotnet build -f net10.0-maccatalyst` still catches the same class of breakage on a developer machine.
 
