@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-20 (CI build-then-classify redesign)
+- **Last Updated:** 2026-07-20 (root-URL fix; believability audit findings)
 
 ---
 
@@ -264,7 +264,51 @@ Attempt 4 (run 29717135645) is the decisive one: same command, same shell sessio
 
 ---
 
+### 2026-07-20 — Adversarial multi-lens audit finds the class of defect the author is structurally blind to
+
+**Insight:** Three independent audits of one implementation plan, each given a *different lens*, scored it 53 / 64 / 45 out of 100. The scores mattered far less than the fact that each lens found a **disjoint class** of defect, and the lowest-scoring lens found the most important one. Reviewing your own work — or asking three reviewers the same question — cannot produce this, because the blind spot is definitional: you cannot audit for a category you did not know was a category.
+
+**Discovery:** A plan to make this prototype demo-believable was audited by (a) an investor/believability lens, (b) an F# technical-soundness lens, (c) a delivery-risk lens.
+
+| Lens | Score | The class it owned |
+|---|---|---|
+| Investor | 53 | **Surface** tells — the plan had catalogued fourteen *data* tells and almost zero *product-surface* tells |
+| F# technical | 64 | Factual undercounts — job state has five string dependants, not the three the plan asserted |
+| Delivery risk | 45 | Process — two-thirds of tasks touch code the test suite cannot compile; six journal lessons the plan reactivated were missing from its own executor notes |
+
+The investor lens found that **"Developer Settings" is a button on both apps' Home screens** ([Customer/Views/Home.fs:19](src/Customer.Mobile/Views/Home.fs), [Provider/Views/Home.fs:28](src/Provider.Mobile/Views/Home.fs)), that neither app has a login (a picker over five hardcoded first names), and that completing one demo loop silently mutates a provider's public star rating. None of these are subtle. All were invisible to an author who had spent the session reasoning about coordinates, timestamps and state machines — the analysis had been *pointed at the data layer*, so it enumerated data defects exhaustively and surface defects not at all.
+
+**Design intent:** the original enumeration was not lazy. It was built by grepping and querying the running system, which is precisely why it is strong on values (`"100 Demo Street"`, `Price = 85.00m`, `ScheduledFor = "Now"`) and blind to arrangement (which buttons exist on which screen). The method chose the category.
+
+**Impact:** meta-pattern worth hunting for — **"lens-shaped blindness"**. When commissioning review, vary the *question*, not the reviewer count. Three reviewers asked "is this plan good?" converge; three asked "would an investor spot a mock?", "will this compile here?", "can a fresh agent execute this?" do not. All three convergent findings (they agreed on exactly one item — a `SeedTests` compile contradiction) are cheap to find; the divergent findings are where the value is.
+
+**Active mitigation:** none automated. The practical rule: before commissioning review of any artefact, name the *categories* of failure it could have, and assign one reviewer per category rather than N reviewers to the whole.
+
+**Related:** [Gap: verified defects found by audit and not yet fixed](#2026-07-20--verified-live-defects-surfaced-by-plan-audit-none-yet-fixed)
+
+---
+
 ## Mistakes & Fixes
+
+### 2026-07-20 — The backend's root URL served a zero-byte 404, which renders as a solid black page
+
+**Symptom:** Reported as "Blank screen — Backend was a black screen." Reproduced exactly: a screenshot of `http://localhost:5162/` in the preview pane was a literally solid black image.
+
+**Attempted:** No dead ends. `curl -i http://localhost:5162/` returned `HTTP/1.1 404`, `Content-Length: 0` in one call, and `curl .../dev/index.html` returned the console markup — which located the fault immediately.
+
+**Root Cause:** `GET /` was never mapped. `Program.fs` mapped `/dev` → redirect and `UseStaticFiles`, but nothing at the root. An empty 404 body renders as an empty page, and an empty page in a dark-mode browser is black. Nothing was broken; the console had been serving correctly the whole time one path over.
+
+**Fix:** In Development, `/` now 302s to `/dev/index.html` exactly as `/dev` already did ([Program.fs](src/Backend.Api/Program.fs), commit `611d203`). Test-first: the new `DevConsoleTests` case failed against the old behaviour (404 vs 200-after-redirect) and passed after; all 18 backend tests green; verified in-browser that the previously-black tab renders the console.
+
+**Prevention:** the root URL is every natural entry point — typing `host:port`, a preview tool's default tab, a shared link. If it is not mapped, it is a black screen for whoever arrives that way, regardless of how healthy the app is. Map `/` to *something* in any app with a browsable surface.
+
+**Time Lost:** ~10 minutes, almost all of it reproduction rather than diagnosis.
+
+**Severity:** Medium — cosmetic in mechanism, but it presents as "the backend is dead" and cost a walkthrough attempt.
+
+**Related:** [Lesson: verify an error's own premises before acting on it](#2026-07-19--verify-an-errors-own-premises-before-acting-on-it)
+
+---
 
 ### 2026-07-20 — An unverified probe justified removing continue-on-error, and turned green runs red
 
@@ -531,6 +575,36 @@ Attempt 4 (run 29717135645) is the decisive one: same command, same shell sessio
 ---
 
 ## Solution Gaps
+
+### 2026-07-20 — Verified live defects surfaced by plan audit; none yet fixed
+
+**Current State:** A three-lens audit of the believability plan surfaced defects in the *shipped* code that no prior review, test or walkthrough had caught. Every one below was verified against source or the running system. None are fixed — they are recorded here so they are not rediscovered a third time.
+
+| # | Defect | Evidence | Severity |
+|---|---|---|---|
+| 1 | **"Developer Settings" is a button on both apps' Home screens**, leading to Teleport / Simulated-GPS / route-percentage / Start-Demo controls. Provider Chat ships a labelled Auto-Reply `Switch` | `Customer/Views/Home.fs:19`, `Provider/Views/Home.fs:28`, `Provider/Views/Chat.fs:36-38` | **Fatal for a demo** |
+| 2 | **Neither app has a login** — `Login.fs` is *"Who's booking today?"* over five hardcoded first names | both `Views/Login.fs` | **Fatal for a demo** |
+| 3 | **Ratings collide across id spaces.** `Rating` has no role column; provider→customer rating writes `RateeId = job.CustomerId`, while the public query filters `RateeId = providerId`. Both sequences run 1–20, so **each completed demo loop mutates a provider's public star average** | `Db.fs:29-30`, `Provider/Update.fs:180`, `Endpoints.fs:30,174` | **High** — same class as the message-identity bug already fixed |
+| 4 | **Every customer's Home accumulates strangers' jobs.** `JobUpdated` broadcasts to `Clients.All` and `Customer/Update.fs:167` appends any unseen job | `Hub.fs:20`, `Customer/Update.fs:163-174` | **High** — cross-tenant leakage on the first screen |
+| 5 | Live-booked jobs render `Address = "My location"` | `Customer/Update.fs:69` → `JobDetail.fs:15` | Medium |
+| 6 | Scripted demo injects chat with `Id = 0` that is never persisted: the second is deduped away, the customer-role one renders as **"You: Hi!"** in the customer's own app, and both vanish on navigation | `DevEndpoints.fs:52-62` | Medium |
+| 7 | Scripted demo double-rates — `runTimeline` applies its own 5-star "Great demo!" *and* `RateAndClose` while the customer app is already on Rating | `DevEndpoints.fs` | Medium |
+| 8 | Back-navigation re-books: `JobCreated` pushes Tracking onto Booking, so back-back-tap creates a duplicate job | `Customer/Update.fs:71-73` | Medium |
+| 9 | Job state has **five** string dependants, not the three previously documented — the extra two are `Provider/Domain.fs:160` (`inFlight` list) and `DevEndpoints.fs:32-75` (`runTimeline`'s hardcoded happy path) | — | Medium — corrects an earlier entry |
+| 10 | Only `Chat.fs` has a `ScrollView`; Home, Catalog, ProviderList, JobDetail are unbounded `VStack`s | both `Views/` | Medium — bites the moment any narrower layout ships |
+
+**Closing this gap requires:** these are Phase 0 and Phase 1 of the believability plan (`~/.claude/plans/i-need-the-complete-hazy-reef.md`). Items 1–4 are the ones that decide whether the product reads as real:
+1. Strip demo scaffolding from both apps' shipping surface; move route control to `/dev` — half a day — pending
+2. Replace the name-picker login with a real-looking sign-in — a couple of hours — pending
+3. Add a role column to `Rating` and scope the public query — a couple of hours — pending
+4. Job-scoped SignalR groups replacing `Clients.All` for `JobUpdated`/notifications — half a day — pending
+5. Items 5–10 — roughly a day in total — pending
+
+**Priority:** High — items 1 and 2 are visible within the first four seconds of any demo, before any feature has a chance to argue otherwise.
+
+**Related:** [Lesson: adversarial multi-lens audit](#2026-07-20--adversarial-multi-lens-audit-finds-the-class-of-defect-the-author-is-structurally-blind-to)
+
+---
 
 ### 2026-07-19 — The Mac Catalyst CI job cannot be a required check
 
