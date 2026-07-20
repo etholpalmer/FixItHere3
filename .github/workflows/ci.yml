@@ -71,48 +71,70 @@ jobs:
   # this job a broken view ships green. Mac Catalyst is the plan's designated
   # verification platform; android/ios are intentionally not built (see the
   # note in the test job).
+  # The hosted image's Xcode installs have twice failed this job for reasons
+  # that are not in our code: 26.5 is complete but the MacCatalyst pack demands
+  # 26.6, and the image's 26.6 — same "Build 17F113" as a working local install —
+  # has a MacOSX.sdk directory that exists on disk yet xcodebuild refuses to
+  # register ("SDK cannot be located", surfacing as actool exit 72). Directory
+  # existence does not predict usability, so the gate below probes with the real
+  # predicate instead: can xcrun find actool for the macosx SDK?
+  #
+  # If no install passes the probe (after one xcodebuild -runFirstLaunch repair
+  # attempt), the job SKIPS loudly with exit 0 rather than presenting a red X
+  # for an environment defect. When the probe passes, the build runs for real
+  # and its result is a genuine gate — no continue-on-error — because the test
+  # projects never compile Views/*.fs or MauiProgram.fs and this job is the only
+  # thing that catches a broken view.
   build-apps:
     name: Build apps (Mac Catalyst)
     runs-on: macos-latest
-    # Advisory, not a gate. The MacCatalyst SDK pins an exact Xcode: pack
-    # 26.5.10301 demands Xcode 26.6, and the hosted image currently ships 26.5,
-    # so the job fails on an SDK/runner mismatch rather than on our code. Keeping
-    # it red-but-non-blocking preserves the signal (it still catches broken views
-    # whenever the images line up) without wedging every merge on Apple's release
-    # cadence. Flip to a gate once the image ships a satisfying Xcode.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
-      # "Newest" is not the same as "usable": the image can carry an Xcode whose
-      # MacOSX platform SDK is absent, which fails later and far less clearly as
-      # `unable to find utility "actool"`. Select the newest install that actually
-      # has the SDK, so any remaining failure names the real constraint.
-      - name: Select newest complete Xcode
+      - name: Find a usable Xcode
+        id: xcode
         run: |
-          best=""
+          usable=""
           for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V); do
-            if [ -d "$app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" ]; then
-              best="$app"
-            else
-              echo "skipping $app — no MacOSX SDK"
+            sudo xcode-select -s "$app/Contents/Developer"
+            if xcrun --sdk macosx --find actool >/dev/null 2>&1; then
+              usable="$app"   # keep the newest that passes; loop continues
             fi
           done
-          if [ -n "$best" ]; then
-            echo "selecting $best"
-            sudo xcode-select -s "$best/Contents/Developer"
+          if [ -z "$usable" ]; then
+            # One repair attempt on the newest install: first-launch registers
+            # platform components that a fresh image may never have initialized.
+            newest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+            if [ -n "$newest" ]; then
+              sudo xcode-select -s "$newest/Contents/Developer"
+              sudo xcodebuild -runFirstLaunch || true
+              if xcrun --sdk macosx --find actool >/dev/null 2>&1; then
+                usable="$newest"
+              fi
+            fi
           fi
-          xcodebuild -version
+          if [ -n "$usable" ]; then
+            sudo xcode-select -s "$usable/Contents/Developer"
+            xcodebuild -version
+            echo "usable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Mac Catalyst build skipped::No Xcode on this image passes 'xcrun --sdk macosx --find actool'. This is a runner-image defect, not a code failure. The build will gate again automatically once the image ships a usable Xcode."
+            echo "usable=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-dotnet@v4
+        if: steps.xcode.outputs.usable == 'true'
         with:
           dotnet-version: '10.0.x'
 
       - name: Install MAUI workload
+        if: steps.xcode.outputs.usable == 'true'
         run: dotnet workload install maui
 
       - name: Build Customer.Mobile
+        if: steps.xcode.outputs.usable == 'true'
         run: dotnet build src/Customer.Mobile -f net10.0-maccatalyst -c Debug
 
       - name: Build Provider.Mobile
+        if: steps.xcode.outputs.usable == 'true'
         run: dotnet build src/Provider.Mobile -f net10.0-maccatalyst -c Debug
