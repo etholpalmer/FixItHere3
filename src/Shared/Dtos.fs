@@ -47,13 +47,23 @@ type MessageDto =
 type SendMessageRequest =
     { JobId: int; SenderId: int; SenderRole: string; Text: string; PhotoBase64: string }
 
+/// Rater/Ratee carry a role for the same reason MessageDto.SenderRole does:
+/// customer and provider ids are independent sequences that both start at 1,
+/// so an id alone cannot say who was rated. Without the roles, a provider
+/// rating a customer moved that customer's id-twin *provider*'s public average.
 [<CLIMutable>]
 type RatingDto =
-    { Id: int; JobId: int; RaterId: int; RateeId: int; Stars: int; Comment: string }
+    { Id: int; JobId: int
+      RaterId: int; RaterRole: string
+      RateeId: int; RateeRole: string
+      Stars: int; Comment: string }
 
 [<CLIMutable>]
 type CreateRatingRequest =
-    { JobId: int; RaterId: int; RateeId: int; Stars: int; Comment: string }
+    { JobId: int
+      RaterId: int; RaterRole: string
+      RateeId: int; RateeRole: string
+      Stars: int; Comment: string }
 
 [<CLIMutable>]
 type LocationDto = { ProviderId: int; Lat: float; Lng: float; UpdatedAt: string }

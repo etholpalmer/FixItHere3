@@ -27,7 +27,10 @@ type Message =
 
 [<CLIMutable>]
 type Rating =
-    { Id: int; JobId: int; RaterId: int; RateeId: int; Stars: int; Comment: string }
+    { Id: int; JobId: int
+      RaterId: int; RaterRole: string
+      RateeId: int; RateeRole: string
+      Stars: int; Comment: string }
 
 module JobStateCodec =
     let ofState (s: JobState) = sprintf "%A" s

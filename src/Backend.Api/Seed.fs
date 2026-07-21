@@ -76,7 +76,9 @@ let run (db: AppDb) =
     let comments = [ "Great work!"; "On time and professional."; "Would book again."; "Fixed it fast."; "Friendly and tidy." ]
     let doneJobs = db.Jobs.Local |> Seq.filter (fun j -> j.State = "Closed") |> Seq.toList
     db.Ratings.AddRange(doneJobs |> List.map (fun j ->
-        { Id = 0; JobId = j.Id; RaterId = j.CustomerId; RateeId = j.ProviderId
+        { Id = 0; JobId = j.Id
+          RaterId = j.CustomerId; RaterRole = "Customer"
+          RateeId = j.ProviderId; RateeRole = "Provider"
           Stars = 3 + rng.Next(0, 3); Comment = comments.[rng.Next(comments.Length)] })) |> ignore
 
     db.Messages.AddRange(doneJobs |> List.truncate 20 |> List.map (fun j ->

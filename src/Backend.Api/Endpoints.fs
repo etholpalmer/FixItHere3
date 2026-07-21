@@ -27,7 +27,11 @@ let private haversineKm (lat1, lng1) (lat2, lng2) =
 
 let private toProviderDto (db: AppDb) (p: Provider) : ProviderDto =
     let svcName = db.Services.Single(fun s -> s.Id = p.ServiceId).Name
-    let ratings = db.Ratings.Where(fun r -> r.RateeId = p.Id).Select(fun r -> r.Stars).ToList()
+    // Filter on (id, role): customer and provider ids overlap, so RateeId alone
+    // would fold ratings *about a customer* into this provider's average.
+    let ratings =
+        db.Ratings.Where(fun r -> r.RateeId = p.Id && r.RateeRole = "Provider")
+                  .Select(fun r -> r.Stars).ToList()
     { Id = p.Id; BusinessName = p.BusinessName
       ServiceId = p.ServiceId; ServiceName = svcName
       Rating = (if ratings.Count = 0 then 0.0 else ratings |> Seq.averageBy float)
@@ -171,17 +175,27 @@ let mapAll (app: WebApplication) =
             return okJson dto })) |> ignore
 
     app.MapGet("/ratings", Func<AppDb, int, IResult>(fun db providerId ->
-        okJson (db.Ratings.Where(fun r -> r.RateeId = providerId)
+        // Same (id, role) filter as toProviderDto — this is the provider's
+        // public feedback, so ratings about a customer must not appear here.
+        okJson (db.Ratings.Where(fun r -> r.RateeId = providerId && r.RateeRole = "Provider")
                 |> Seq.map (fun r ->
-                    { Id = r.Id; JobId = r.JobId; RaterId = r.RaterId
-                      RateeId = r.RateeId; Stars = r.Stars; Comment = r.Comment })
+                    { Id = r.Id; JobId = r.JobId
+                      RaterId = r.RaterId; RaterRole = r.RaterRole
+                      RateeId = r.RateeId; RateeRole = r.RateeRole
+                      Stars = r.Stars; Comment = r.Comment })
                 |> List.ofSeq))) |> ignore
 
     app.MapPost("/ratings", Func<CreateRatingRequest, AppDb, JobService, System.Threading.Tasks.Task<IResult>>(
         fun req db svc -> task {
+            // Normalise the roles rather than trusting the payload verbatim: an
+            // absent role would otherwise persist as null and match no filter,
+            // silently hiding the rating from both directions.
+            let norm (r: string) = if r = "Provider" then "Provider" else "Customer"
             let rating =
-                { Id = 0; JobId = req.JobId; RaterId = req.RaterId
-                  RateeId = req.RateeId; Stars = req.Stars; Comment = req.Comment }
+                { Id = 0; JobId = req.JobId
+                  RaterId = req.RaterId; RaterRole = norm req.RaterRole
+                  RateeId = req.RateeId; RateeRole = norm req.RateeRole
+                  Stars = req.Stars; Comment = req.Comment }
             db.Ratings.Add rating |> ignore
             db.SaveChanges() |> ignore
             // Rating a completed job closes it (simplified single-sided close for the demo)
@@ -191,8 +205,10 @@ let mapAll (app: WebApplication) =
                 ()
             let saved = db.Ratings.OrderByDescending(fun r -> r.Id).First()
             return okJson
-                { Id = saved.Id; JobId = saved.JobId; RaterId = saved.RaterId
-                  RateeId = saved.RateeId; Stars = saved.Stars; Comment = saved.Comment } })) |> ignore
+                { Id = saved.Id; JobId = saved.JobId
+                  RaterId = saved.RaterId; RaterRole = saved.RaterRole
+                  RateeId = saved.RateeId; RateeRole = saved.RateeRole
+                  Stars = saved.Stars; Comment = saved.Comment } })) |> ignore
 
     app.MapGet("/location", Func<AppDb, int, IResult>(fun db providerId ->
         match db.Providers.SingleOrDefault(fun p -> p.Id = providerId) |> Option.ofObj with

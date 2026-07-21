@@ -69,7 +69,9 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
         do! pause ()
         do! hub.Notify "Payment Complete"
         db.Ratings.Add
-            { Id = 0; JobId = jobId; RaterId = job.CustomerId; RateeId = job.ProviderId
+            { Id = 0; JobId = jobId
+              RaterId = job.CustomerId; RaterRole = "Customer"
+              RateeId = job.ProviderId; RateeRole = "Provider"
               Stars = 5; Comment = "Great demo!" } |> ignore
         db.SaveChanges() |> ignore
         do! apply RateAndClose

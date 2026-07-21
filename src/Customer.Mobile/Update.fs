@@ -132,7 +132,9 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         match model.Session, model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
         | Some s, Some job ->
             let req =
-                { JobId = jobId; RaterId = s.UserId; RateeId = job.ProviderId
+                { JobId = jobId
+                  RaterId = s.UserId; RaterRole = s.Role
+                  RateeId = job.ProviderId; RateeRole = "Provider"
                   Stars = stars; Comment = comment }
             model, apiCmd (fun () -> deps.SubmitRating req) (fun _ -> RatingSubmitted)
         | _ -> model, Cmd.ofMsg (ApiError "Job not found")

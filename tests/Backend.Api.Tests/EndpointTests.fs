@@ -83,3 +83,48 @@ let ``provider online toggle 404s on unknown id`` () =
     use c = client ()
     let resp = c.PutAsJsonAsync("/providers/9999/online", {| online = true |}).Result
     Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode)
+
+// ---------------------------------------------------------------------------
+// Rating identity. Customer and provider ids are independent sequences that
+// both start at 1, so RateeId alone cannot say WHO was rated. Before RateeRole
+// existed, a provider rating customer 1 dropped provider 1's public average
+// (measured live: 3.33 -> 2.75) and put "customer was late" in that provider's
+// public feedback. Same class as the message-identity bug fixed earlier.
+// ---------------------------------------------------------------------------
+
+[<Fact>]
+let ``rating a customer does not change the provider's public rating`` () =
+    use c = client ()
+    let providerBefore =
+        c.GetFromJsonAsync<Envelope<ProviderDto>>("/providers/1").Result.Data
+    // A completed job, rated by its provider, about the CUSTOMER — who shares
+    // the id 1 with Mike's Plumbing.
+    let jobs = c.GetFromJsonAsync<Envelope<JobDto list>>("/jobs").Result.Data
+    let job = jobs |> List.find (fun j -> j.State = "Completed")
+    let req =
+        { JobId = job.Id; RaterId = job.ProviderId; RaterRole = "Provider"
+          RateeId = job.CustomerId; RateeRole = "Customer"
+          Stars = 1; Comment = "customer was late" }
+    let resp = c.PostAsJsonAsync("/ratings", req).Result
+    Assert.Equal(HttpStatusCode.OK, resp.StatusCode)
+
+    let providerAfter =
+        c.GetFromJsonAsync<Envelope<ProviderDto>>("/providers/1").Result.Data
+    Assert.Equal(providerBefore.RatingCount, providerAfter.RatingCount)
+    Assert.Equal(providerBefore.Rating, providerAfter.Rating)
+
+[<Fact>]
+let ``customer-directed ratings stay out of the provider's public feedback`` () =
+    use c = client ()
+    let jobs = c.GetFromJsonAsync<Envelope<JobDto list>>("/jobs").Result.Data
+    let job = jobs |> List.find (fun j -> j.State = "Completed")
+    let req =
+        { JobId = job.Id; RaterId = job.ProviderId; RaterRole = "Provider"
+          RateeId = job.CustomerId; RateeRole = "Customer"
+          Stars = 1; Comment = "customer was late" }
+    c.PostAsJsonAsync("/ratings", req).Result |> ignore
+
+    let feedback =
+        c.GetFromJsonAsync<Envelope<RatingDto list>>("/ratings?providerId=1").Result.Data
+    Assert.DoesNotContain(feedback, fun r -> r.Comment = "customer was late")
+    Assert.All(feedback, fun r -> Assert.Equal("Provider", r.RateeRole))
