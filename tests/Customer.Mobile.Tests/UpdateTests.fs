@@ -33,7 +33,7 @@ let ``resetTo clears history`` () =
     Assert.Empty(m2.History)
 
 let stubDeps : ApiDeps =
-    { Login = fun _ -> Task.FromResult(Ok { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" })
+    { Login = fun _ _ -> Task.FromResult(Ok { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" })
       GetServices = fun () -> Task.FromResult(Ok [])
       GetProviders = fun _ _ _ -> Task.FromResult(Ok [])
       GetRatings = fun _ -> Task.FromResult(Ok [])

@@ -11,7 +11,9 @@ let client () = (new Factory()).CreateClient()
 [<Fact>]
 let ``login returns fake token for named customer`` () =
     use c = client ()
-    let resp = c.PostAsJsonAsync("/login", { Role = "Customer"; Name = "John" }).Result
+    let resp =
+        c.PostAsJsonAsync("/login",
+            { Role = "Customer"; Email = "john@gmail.com"; Password = "Customer1!" }).Result
     let env = resp.Content.ReadFromJsonAsync<Envelope<LoginResponse>>().Result
     Assert.True(env.Success)
     Assert.Equal("Customer", env.Data.Role)
@@ -128,3 +130,55 @@ let ``customer-directed ratings stay out of the provider's public feedback`` () 
         c.GetFromJsonAsync<Envelope<RatingDto list>>("/ratings?providerId=1").Result.Data
     Assert.DoesNotContain(feedback, fun r -> r.Comment = "customer was late")
     Assert.All(feedback, fun r -> Assert.Equal("Provider", r.RateeRole))
+
+// ---------------------------------------------------------------------------
+// Sign-in failure modes. A login that accepts any password is a tell the moment
+// someone tests it — which is exactly what a sceptical demo audience does.
+// ---------------------------------------------------------------------------
+
+[<Fact>]
+let ``login rejects a wrong password`` () =
+    use c = client ()
+    let resp =
+        c.PostAsJsonAsync("/login",
+            { Role = "Customer"; Email = "john@gmail.com"; Password = "wrong" }).Result
+    Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode)
+
+[<Fact>]
+let ``login rejects an unknown email`` () =
+    use c = client ()
+    let resp =
+        c.PostAsJsonAsync("/login",
+            { Role = "Customer"; Email = "nobody@nowhere.com"; Password = "Customer1!" }).Result
+    Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode)
+
+[<Fact>]
+let ``login is case-insensitive on email but not on password`` () =
+    use c = client ()
+    let upper =
+        c.PostAsJsonAsync("/login",
+            { Role = "Customer"; Email = "John@Gmail.com"; Password = "Customer1!" }).Result
+    Assert.Equal(HttpStatusCode.OK, upper.StatusCode)
+    let lowerPwd =
+        c.PostAsJsonAsync("/login",
+            { Role = "Customer"; Email = "john@gmail.com"; Password = "customer1!" }).Result
+    Assert.Equal(HttpStatusCode.Unauthorized, lowerPwd.StatusCode)
+
+[<Fact>]
+let ``a customer cannot sign in with the provider password`` () =
+    use c = client ()
+    let resp =
+        c.PostAsJsonAsync("/login",
+            { Role = "Customer"; Email = "john@gmail.com"; Password = "Provider1!" }).Result
+    Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode)
+
+[<Fact>]
+let ``provider signs in with its business email`` () =
+    use c = client ()
+    let resp =
+        c.PostAsJsonAsync("/login",
+            { Role = "Provider"; Email = "contact@mikesplumbing.ca"; Password = "Provider1!" }).Result
+    Assert.Equal(HttpStatusCode.OK, resp.StatusCode)
+    let env = resp.Content.ReadFromJsonAsync<Envelope<LoginResponse>>().Result
+    Assert.Equal("Mike's Plumbing", env.Data.DisplayName)
+    Assert.Equal("Provider", env.Data.Role)

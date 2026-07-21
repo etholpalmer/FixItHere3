@@ -33,7 +33,7 @@ let ``slider position interpolates and clamps`` () =
     Assert.Equal((0.0, 0.0), Slider.position (0.0, 0.0) (10.0, 10.0) -0.3)
 
 let stubDeps : ProviderApiDeps =
-    { Login = fun _ -> Task.FromResult(Ok { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" })
+    { Login = fun _ _ -> Task.FromResult(Ok { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" })
       GetProvider = fun _ -> Task.FromResult(Error "unused")
       SetOnline = fun _ b -> Task.FromResult(Error "unused")
       GetMyJobs = fun _ -> Task.FromResult(Ok [])

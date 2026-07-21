@@ -26,8 +26,14 @@ let init () = Model.initial, delayCmd 1500 SplashDone
 let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     match msg with
     | SplashDone -> { model with Screen = Login; History = [] }, Cmd.none
-    | SelectCustomer name -> model, apiCmd (fun () -> deps.Login name) LoggedIn
+    | LoginEmailChanged e -> { model with LoginEmail = e }, Cmd.none
+    | LoginPasswordChanged p -> { model with LoginPassword = p }, Cmd.none
+    | SignIn when model.SigningIn -> model, Cmd.none    // ignore a double tap
+    | SignIn ->
+        { model with SigningIn = true; Error = None },
+        apiCmd (fun () -> deps.Login model.LoginEmail model.LoginPassword) LoggedIn
     | LoggedIn resp ->
+        let model = { model with SigningIn = false }
         // Session and LoginResponse now share a field set, so annotate explicitly.
         let session : Session = { Token = resp.Token; UserId = resp.UserId
                                   Role = resp.Role; DisplayName = resp.DisplayName }
@@ -71,7 +77,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | JobCreated job ->
         let m = { model with Jobs = job :: model.Jobs }
         Nav.push m (Tracking job.Id), Cmd.none
-    | ApiError e -> { model with Error = Some e }, Cmd.none
+    | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
     | DismissToast -> { model with Toast = None }, Cmd.none
     | CancelActiveJob jobId ->

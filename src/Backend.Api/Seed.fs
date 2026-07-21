@@ -30,8 +30,8 @@ let run (db: AppDb) =
           "Alice"; "Tom"; "Grace"; "Henry"; "Ivy"
           "Jack"; "Karen"; "Leo"; "Mona"; "Nate"
           "Olive"; "Paul"; "Quinn"; "Rita"; "Sam" ]
-    db.Customers.AddRange(customerNames |> List.map (fun n ->
-        { Id = 0; Name = n; Lat = lat (); Lng = lng () })) |> ignore
+    db.Customers.AddRange(customerNames |> List.mapi (fun i n ->
+        { Id = 0; Name = n; Email = Auth.customerEmail i n; Lat = lat (); Lng = lng () })) |> ignore
 
     let namedProviders =
         [ "Mike's Plumbing", "Plumbing", "White van"
@@ -51,7 +51,7 @@ let run (db: AppDb) =
         (namedProviders |> List.map (fun (b, s, v) -> b, s, v))
         @ (fillerProviders |> List.map (fun (b, s) -> b, s, "Van"))
     db.Providers.AddRange(providers |> List.map (fun (biz, s, vehicle) ->
-        { Id = 0; BusinessName = biz; ServiceId = (svc s).Id
+        { Id = 0; BusinessName = biz; Email = Auth.providerEmail biz; ServiceId = (svc s).Id
           Lat = lat (); Lng = lng (); Online = true
           Vehicle = vehicle; PhotoUrl = sprintf "/img/provider-%d.png" (rng.Next(1, 9)) })) |> ignore
     db.SaveChanges() |> ignore

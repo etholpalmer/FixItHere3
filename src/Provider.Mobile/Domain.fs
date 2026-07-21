@@ -60,6 +60,12 @@ type Model =
       RatingComment: string
       PaymentResult: PaymentResult option
       FakeCallActive: bool
+      /// Sign-in form. Prefilled with the primary demo account so an operator
+      /// is one tap from signing in, but editable — the field is the only way to
+      /// switch accounts now that the name picker is gone.
+      LoginEmail: string
+      LoginPassword: string
+      SigningIn: bool
       Toast: string option
       Error: string option }
 
@@ -71,11 +77,15 @@ module Model =
           CustomerTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           AutoReply = false; AutoRepliesSent = 0
           ChatDrafts = Map.empty; TypingToken = 0; RatingStars = 5; RatingComment = ""
-          PaymentResult = None; FakeCallActive = false; Toast = None; Error = None }
+          PaymentResult = None; FakeCallActive = false
+          LoginEmail = "contact@mikesplumbing.ca"; LoginPassword = "Provider1!"; SigningIn = false
+          Toast = None; Error = None }
 
 type Msg =
     | SplashDone
-    | SelectProvider of name: string
+    | LoginEmailChanged of string
+    | LoginPasswordChanged of string
+    | SignIn
     | LoggedIn of LoginResponse
     | Navigate of Screen
     | GoBack
@@ -135,7 +145,7 @@ type Msg =
     | ApiError of string
 
 type ProviderApiDeps =
-    { Login: string -> Task<Result<LoginResponse, string>>
+    { Login: string -> string -> Task<Result<LoginResponse, string>>
       GetProvider: int -> Task<Result<ProviderDto, string>>
       SetOnline: int -> bool -> Task<Result<ProviderDto, string>>
       GetMyJobs: int -> Task<Result<JobDto list, string>>

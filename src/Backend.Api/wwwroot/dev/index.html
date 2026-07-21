@@ -710,17 +710,17 @@ async function refresh() {
     if (keep) sel.value = keep;
   }
 
-  // Seeded customers; the named five are guaranteed present.
+  // Real roster from the server. This used to POST /login once per hardcoded
+  // name to discover ids — which broke as soon as login needed a password, and
+  // never showed customers beyond the five that were hardcoded here.
   const sel = $("customer");
   if (!sel.childElementCount) {
-    for (const name of ["John", "Mary", "Steve", "Susan", "Bob"]) {
-      const u = await api("POST", "/login", { role: "Customer", name });
-      if (u) {
-        const o = document.createElement("option");
-        o.value = u.userId;
-        o.textContent = u.displayName;
-        sel.append(o);
-      }
+    const customers = await api("GET", "/customers");
+    for (const cst of customers || []) {
+      const o = document.createElement("option");
+      o.value = cst.id;
+      o.textContent = cst.name;
+      sel.append(o);
     }
   }
   await refreshJobs();

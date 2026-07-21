@@ -23,7 +23,10 @@ xcrun simctl boot "iPhone 17 Pro" && open -a Simulator
 dotnet build -t:Run -f net10.0-ios src/Customer.Mobile
 ```
 
-Requires the backend running (above). Log in as John/Mary/Steve/Susan/Bob.
+Requires the backend running (above). The sign-in form is prefilled with the
+primary demo account — `john@gmail.com` / `Customer1!` — so it is one tap. Other
+seeded customers follow the same shape (`mary@outlook.com`, `steve@icloud.com`,
+`susan@yahoo.ca`, `bob@gmail.com`); `GET /customers` lists them all.
 Use the /dev console as the "provider side" to accept/drive jobs, or press
 Start Demo there for the fully scripted flow.
 
@@ -39,11 +42,16 @@ xcrun simctl boot "iPhone 17" && open -a Simulator
 dotnet build -t:Run -f net10.0-ios src/Provider.Mobile
 ```
 
-Requires the backend running (above). Log in as one of:
-- **Mike's Plumbing** (password: Provider1!)
-- **Joe Electric** (password: Provider1!)
-- **Rapid Tire Repair** (password: Provider1!)
-- **Elite HVAC** (password: Provider1!)
+Requires the backend running (above). Prefilled with `contact@mikesplumbing.ca`
+/ `Provider1!`. Provider emails are derived from the business name:
+- **Mike's Plumbing** — `contact@mikesplumbing.ca`
+- **Joe Electric** — `contact@joeelectric.ca`
+- **Rapid Tire Repair** — `contact@rapidtirerepair.ca`
+- **Elite HVAC** — `contact@elitehvac.ca`
+
+All demo accounts share one password per role (`Customer1!` / `Provider1!`).
+This is deliberately *not* a security mechanism — see `src/Backend.Api/Auth.fs`.
+It exists so a sign-in that is tested during a demo behaves like a real one.
 
 From **DevSettings**, press **Start Demo** to watch the fully scripted two-app flow
 (booking, acceptance, travel, chat, work completion, payment, rating).

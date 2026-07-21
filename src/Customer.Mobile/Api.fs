@@ -15,7 +15,8 @@ let createDepsWith
     (handler: HttpMessageHandler)
     (baseUrl: string) : ApiDeps =
     let http = new HttpClient(handler, BaseAddress = Uri(baseUrl))
-    { Login = fun name -> Http.postEnv http "/login" { Role = "Customer"; Name = name }
+    { Login = fun email password ->
+          Http.postEnv http "/login" { Role = "Customer"; Email = email; Password = password }
       GetServices = fun () -> Http.getEnv http "/services"
       GetProviders = fun serviceId lat lng ->
           Http.getEnv http (sprintf "/providers?serviceId=%d&lat=%f&lng=%f" serviceId lat lng)

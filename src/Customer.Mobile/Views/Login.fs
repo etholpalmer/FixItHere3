@@ -4,11 +4,22 @@ open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Customer
 
-let customers = [ "John"; "Mary"; "Steve"; "Susan"; "Bob" ]
+/// Credential sign-in rather than a name picker. The fields are prefilled with
+/// the primary demo account so an operator is one tap from signing in, and the
+/// email field is how you switch accounts — there is no list to pick from.
+/// Nested VStacks are ambiguous inside a Fabulous computation expression
+/// (FS0792), so the form is flat.
+let view (model: Model) =
+    (VStack(spacing = 14.) {
+        Label("FixItHere").font(size = 34., attributes = Microsoft.Maui.Controls.FontAttributes.Bold)
+        Label("Sign in to book a service").font(size = 16.)
 
-let view (_model: Model) =
-    (VStack(spacing = 12.) {
-        Label("Who's booking today?").font(size = 24.).centerTextHorizontal()
-        for name in customers do
-            Button(name, SelectCustomer name)
-    }).padding(24.)
+        Label("Email").font(size = 13.)
+        Entry(model.LoginEmail, LoginEmailChanged).keyboard(Microsoft.Maui.Keyboard.Email)
+
+        Label("Password").font(size = 13.)
+        Entry(model.LoginPassword, LoginPasswordChanged).isPassword(true)
+
+        Button((if model.SigningIn then "Signing in…" else "Sign in"), SignIn)
+            .isEnabled(not model.SigningIn)
+    }).centerVertical().padding(28.)

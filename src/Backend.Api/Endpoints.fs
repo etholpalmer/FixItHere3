@@ -41,21 +41,33 @@ let private toProviderDto (db: AppDb) (p: Provider) : ProviderDto =
 
 let mapAll (app: WebApplication) =
 
+    // Demo auth (see Auth.fs): real *shape* and real failure modes, no security.
+    // Distinguishing "unknown account" from "wrong password" is what makes a
+    // sign-in feel real when someone tests it; both are 401 to the user.
     app.MapPost("/login", Func<LoginRequest, AppDb, IResult>(fun req db ->
+        let email = if isNull req.Email then "" else req.Email.Trim().ToLowerInvariant()
+        let passwordOk = req.Password = Auth.passwordFor req.Role
         match req.Role with
         | "Customer" ->
-            match db.Customers.SingleOrDefault(fun c -> c.Name = req.Name) |> Option.ofObj with
+            match db.Customers.SingleOrDefault(fun c -> c.Email = email) |> Option.ofObj with
+            | None -> err 401 "No account found for that email"
+            | Some _ when not passwordOk -> err 401 "Incorrect password"
             | Some c ->
                 okJson { Token = sprintf "fake-customer-%d" c.Id
                          UserId = c.Id; Role = "Customer"; DisplayName = c.Name }
-            | None -> err 404 (sprintf "No customer named %s" req.Name)
         | "Provider" ->
-            match db.Providers.SingleOrDefault(fun p -> p.BusinessName = req.Name) |> Option.ofObj with
+            match db.Providers.SingleOrDefault(fun p -> p.Email = email) |> Option.ofObj with
+            | None -> err 401 "No account found for that email"
+            | Some _ when not passwordOk -> err 401 "Incorrect password"
             | Some p ->
                 okJson { Token = sprintf "fake-provider-%d" p.Id
                          UserId = p.Id; Role = "Provider"; DisplayName = p.BusinessName }
-            | None -> err 404 (sprintf "No provider named %s" req.Name)
         | r -> err 400 (sprintf "Unknown role %s" r))) |> ignore
+
+    app.MapGet("/customers", Func<AppDb, IResult>(fun db ->
+        okJson (db.Customers.OrderBy(fun c -> c.Id)
+                |> Seq.map (fun c -> { Id = c.Id; Name = c.Name; Email = c.Email })
+                |> List.ofSeq))) |> ignore
 
     app.MapGet("/services", Func<AppDb, IResult>(fun db ->
         okJson (db.Services.OrderBy(fun s -> s.Id)

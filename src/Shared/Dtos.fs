@@ -8,10 +8,18 @@ module Envelope =
     let fail (msg: string) : Envelope<obj> = { Success = false; Data = null; Error = msg }
 
 [<CLIMutable>]
-type LoginRequest = { Role: string; Name: string }
+/// Demo auth: real-shaped (email + password, with real failure modes) but not
+/// real security — tokens are literally "fake-customer-1". See Auth.fs.
+type LoginRequest = { Role: string; Email: string; Password: string }
 
 [<CLIMutable>]
 type LoginResponse = { Token: string; UserId: int; Role: string; DisplayName: string }
+
+/// The /dev console needs a customer roster for its persona picker; it used to
+/// POST /login per hardcoded name to enumerate ids, which broke the moment
+/// login required credentials.
+[<CLIMutable>]
+type CustomerDto = { Id: int; Name: string; Email: string }
 
 [<CLIMutable>]
 type ServiceDto = { Id: int; Name: string }
