@@ -53,9 +53,10 @@ All demo accounts share one password per role (`Customer1!` / `Provider1!`).
 This is deliberately *not* a security mechanism — see `src/Backend.Api/Auth.fs`.
 It exists so a sign-in that is tested during a demo behaves like a real one.
 
-From **DevSettings**, press **Start Demo** to watch the fully scripted two-app flow
-(booking, acceptance, travel, chat, work completion, payment, rating).
-Customer app also has a **Start Demo** button in DevSettings.
+Demo controls live in the `/dev` console, not in the apps — Start Demo, the
+route walk, provider position and message injection are all driven from there.
+The apps ship no developer surface: an operator control visible on a product
+screen is the loudest tell there is.
 
 ## Test
 
