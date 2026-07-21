@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-20 (root-URL fix; believability audit findings)
+- **Last Updated:** 2026-07-20 (Phase 0 of the believability rebuild complete)
 
 ---
 
@@ -288,7 +288,64 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
+### 2026-07-20 — One id collision, four separate discoveries: convention-namespaced identity does not hold
+
+**Insight:** Customer and Provider ids are independent sequences that both start at 1. That single fact has now produced four distinct user-visible defects, each found separately, each after shipping, each fixed by threading `(id, role)` through one more place:
+
+| # | Surface | Symptom | Fixed in |
+|---|---|---|---|
+| 1 | Chat messages | provider's messages rendered as the customer's own; sender name resolved Customers-first | `1f3b309` |
+| 2 | Typing / seen indicators | never appeared for the documented demo pair (customer 1 + provider 1) | `1f3b309` |
+| 3 | Ratings | provider rating a customer moved that *provider's* public average — measured 3.3333 → 2.7500 | `71d610e` |
+| 4 | SignalR group keys | job traffic broadcast to everyone; strangers' jobs appeared in each customer's list | `637a1e3` |
+
+**Discovery:** never by a test. #1 came from a manual API walk, #2 from an Opus review pass, #3 and #4 from an adversarial plan audit. The test suite was green throughout — see the companion lesson on fixtures that dodge the production shape.
+
+**Design intent:** ids were modelled as plain `int` because *within either table* an id does identify its row. The assumption held one layer up and silently stopped holding wherever two id spaces met in one field. Nothing in the type system objected, because both spaces are `int`.
+
+**Impact — the generalisable point:** the fix each time was correct but local. Four local fixes for one root cause is the signal that the abstraction is wrong, not that the callers were careless. **When the same class of defect recurs in unrelated surfaces, stop fixing call sites and change the type.** A `Actor = Customer of int | Provider of int` would have made every one of these four a compile error rather than a demo-day surprise.
+
+**Active mitigation:** partial only. `isSelf session id role` is now the single sanctioned comparison in both apps, and hub groups are keyed `(role, id)`. But the underlying representation is still a bare `int` namespaced by convention, so a fifth surface can repeat the pattern. Raised with the user; the natural moment to close it is the plan's contracts-first task, before Phase 2's domain work spreads identity further.
+
+**Related:** [Lesson: cross-entity id-space collision](#2026-07-19--cross-entity-id-space-collision-independent-sequences-that-both-start-at-1), [Lesson: fixtures that dodge the production shape](#2026-07-19--test-fixtures-that-dodge-the-production-shape-pass-forever)
+
+---
+
+### 2026-07-20 — Removing scaffolding is a code change; the comments explaining the removal are a second, unverified claim
+
+**Insight:** When a capability is withdrawn from the UI but its code retained, the comment left behind asserts something about the *world* — "this is now driven from X" — and that claim can be false the moment it is written. It reads as authoritative and no compiler checks it.
+
+**Discovery:** A subagent removed the DevSettings screen from both apps and annotated the retained `Msg` cases "Operator-driven from /dev". Grepping the console for the controls those comments named returned **zero** matches for auto-reply, Real GPS and Teleport. Only the route walk existed, and even that bypasses the app's `Msg` entirely by calling `PUT /location` directly. A reader would have gone hunting for wiring that does not exist.
+
+**Impact:** rewritten to state plainly that the cases are unreachable, *why* they are retained (the auto-reply handlers carry the id-collision regression tests), and that no console control replaces them. The general rule: **a comment that describes behaviour elsewhere in the system is a claim to verify, not prose to write.** Grep the thing you are about to name.
+
+**Related:** [Mistake: a subagent's self-report is not verification](#2026-07-20--a-subagents-self-report-is-not-verification-review-found-a-real-bug-under-a-clean-summary)
+
+---
+
 ## Mistakes & Fixes
+
+### 2026-07-20 — A subagent's self-report is not verification: review found a real bug under a clean summary
+
+**Symptom:** A subagent completed plan task 0a and reported success with verbatim-looking evidence — both apps compiling at 0/0, 97 tests passing, and a clean grep. All of that was true.
+
+**Attempted:** Nothing was wrong with the report. The defects were found by reviewing the diff anyway, on the standing convention that implementation is reviewed before commit.
+
+**Root Cause:** two independent problems the subagent had no way to see:
+1. Its new `/dev` route control was commented "Mirrors `Slider.position`" but interpolated from the provider's **current** position rather than latching an origin the way `Provider.Update` latches `SliderStart`. That makes the percentages *relative*: pressing 50% then 25% moves the provider further along instead of back, and repeated presses converge on the target without arriving. Verified numerically after fixing — 25% following 100% now returns to the 25% mark.
+2. The comments on the retained `Msg` cases claimed `/dev` wiring that does not exist (see the companion lesson).
+
+**Fix:** origin latched per provider+job; comments rewritten to match reality. Both in `8bdf06d`.
+
+**Prevention:** the value of the review is highest exactly where the subagent's report is most confident — a passing build and a green suite say nothing about semantics a test does not cover. Read the diff for *claims*, not just for compile errors: "mirrors X" and "driven from Y" are both assertions that can be checked in one grep each.
+
+**Time Lost:** ~15 minutes, all of it review rather than debugging.
+
+**Severity:** Medium — neither defect broke the build, and both would have surfaced first during a live demo, which is the worst possible place.
+
+**Related:** [Lesson: removing scaffolding leaves unverified claims](#2026-07-20--removing-scaffolding-is-a-code-change-the-comments-explaining-the-removal-are-a-second-unverified-claim), [Lesson: mutation is the only honest proof](#2026-07-19--mutation-is-the-only-honest-proof-that-a-test-can-fail)
+
+---
 
 ### 2026-07-20 — The backend's root URL served a zero-byte 404, which renders as a solid black page
 
@@ -578,7 +635,9 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ### 2026-07-20 — Verified live defects surfaced by plan audit; none yet fixed
 
-**Current State:** A three-lens audit of the believability plan surfaced defects in the *shipped* code that no prior review, test or walkthrough had caught. Every one below was verified against source or the running system. None are fixed — they are recorded here so they are not rediscovered a third time.
+**Current State:** A three-lens audit of the believability plan surfaced defects in the *shipped* code that no prior review, test or walkthrough had caught. Every one below was verified against source or the running system.
+
+**Updated 2026-07-20 — Phase 0 closed items 1, 2, 3, 4 and 5.** Remaining: 6 (scripted demo's ephemeral chat), 7 (double-rating), 8 (back re-books), 9 (five state-string dependants — documented, not yet consolidated), 10 (unbounded `VStack`s, which an iPhone viewport will clip). Items 6–8 are plan task 7; item 10 is task 12.
 
 | # | Defect | Evidence | Severity |
 |---|---|---|---|
@@ -593,12 +652,13 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 | 9 | Job state has **five** string dependants, not the three previously documented — the extra two are `Provider/Domain.fs:160` (`inFlight` list) and `DevEndpoints.fs:32-75` (`runTimeline`'s hardcoded happy path) | — | Medium — corrects an earlier entry |
 | 10 | Only `Chat.fs` has a `ScrollView`; Home, Catalog, ProviderList, JobDetail are unbounded `VStack`s | both `Views/` | Medium — bites the moment any narrower layout ships |
 
-**Closing this gap requires:** these are Phase 0 and Phase 1 of the believability plan (`~/.claude/plans/i-need-the-complete-hazy-reef.md`). Items 1–4 are the ones that decide whether the product reads as real:
-1. Strip demo scaffolding from both apps' shipping surface; move route control to `/dev` — half a day — pending
-2. Replace the name-picker login with a real-looking sign-in — a couple of hours — pending
-3. Add a role column to `Rating` and scope the public query — a couple of hours — pending
-4. Job-scoped SignalR groups replacing `Clients.All` for `JobUpdated`/notifications — half a day — pending
-5. Items 5–10 — roughly a day in total — pending
+**Closing this gap requires:**
+1. Strip demo scaffolding from both apps' shipping surface; move route control to `/dev` — ✅ shipped `8bdf06d`
+2. Replace the name-picker login with a real-looking sign-in — ✅ shipped `2d888f4`
+3. Add a role column to `Rating` and scope the public query — ✅ shipped `71d610e`
+4. Job-scoped SignalR groups replacing `Clients.All` — ✅ shipped `637a1e3`
+5. `Address = "My location"` on booked jobs — pending, folded into Phase 1 task 1 (geography)
+6. Items 6–10 — roughly a day — pending, Phase 2 task 7 and Phase 3 task 12
 
 **Priority:** High — items 1 and 2 are visible within the first four seconds of any demo, before any feature has a chance to argue otherwise.
 
