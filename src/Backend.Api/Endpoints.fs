@@ -171,7 +171,10 @@ let mapAll (app: WebApplication) =
                   SenderRole = saved.SenderRole; SenderName = senderName
                   Text = saved.Text; PhotoBase64 = saved.PhotoBase64
                   SentAt = saved.SentAt; Seen = saved.Seen }
-            do! hub.MessageReceived dto
+            // The job supplies both parties; MessageDto carries only the sender.
+            let job = db.Jobs.SingleOrDefault(fun j -> j.Id = saved.JobId)
+            if not (obj.ReferenceEquals(job, null)) then
+                do! hub.MessageReceived (dto, job.CustomerId, job.ProviderId)
             return okJson dto })) |> ignore
 
     app.MapGet("/ratings", Func<AppDb, int, IResult>(fun db providerId ->
@@ -235,5 +238,5 @@ let mapAll (app: WebApplication) =
             match db.Jobs.SingleOrDefault(fun j -> j.Id = req.JobId) |> Option.ofObj with
             | None -> return err 404 (sprintf "Job %d not found" req.JobId)
             | Some job ->
-                do! hub.Notify "Payment Complete"
+                do! hub.NotifyJob ("Payment Complete", job.CustomerId, job.ProviderId)
                 return okJson { JobId = job.Id; Amount = job.Price; Status = "Transferred" } })) |> ignore

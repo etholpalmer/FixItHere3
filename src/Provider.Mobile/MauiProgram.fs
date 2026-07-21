@@ -49,12 +49,13 @@ let mutable private hubStarted = false
 let private updateWithHub (msg: Msg) (model: Model) =
     let m, cmd = Update.update deps msg model
     match msg with
-    | LoggedIn _ when not hubStarted ->
+    | LoggedIn resp when not hubStarted ->
         let hubCmd =
             Cmd.ofSub (fun dispatch ->
                 task {
                     try
                         do! hub.Start(
+                                resp.Role, resp.UserId,
                                 (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
                                 (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
                                 (fun (j, s, r) -> dispatch (HubTyping (j, s, r))),

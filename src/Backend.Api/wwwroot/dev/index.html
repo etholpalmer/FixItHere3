@@ -868,11 +868,18 @@ conn.on("ProviderUpdated", p => {
 });
 
 conn.onreconnecting(() => setConn("wait", "Reconnecting"));
-conn.onreconnected(() => { setConn("up", "Live"); refresh(); });
 conn.onclose(() => setConn("down", "Disconnected"));
 
+/* The console deliberately keeps the firehose: job traffic is now delivered to
+   the job's own parties, so without joining this group the operator would see
+   nothing. Rejoined on reconnect — SignalR drops group membership. */
+const joinConsole = () => conn.invoke("JoinConsole").catch(e =>
+  log(`Could not join console group — events will be missing: ${e.message}`, "error"));
+
+conn.onreconnected(() => { setConn("up", "Live"); joinConsole(); refresh(); });
+
 conn.start()
-  .then(() => { setConn("up", "Live"); log("Realtime connected", "note"); })
+  .then(() => { setConn("up", "Live"); joinConsole(); log("Realtime connected", "note"); })
   .catch(e => { setConn("down", "Disconnected"); log(`Realtime failed — ${e.message}`, "error"); });
 
 refresh();

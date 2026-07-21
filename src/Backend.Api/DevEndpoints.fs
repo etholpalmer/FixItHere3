@@ -26,14 +26,16 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
         let svc = JobService(db, hub)
         let pause () = Task.Delay 2000
         let apply ev = task { let! _ = svc.Apply jobId ev in () }
+        // Hoisted: every notification below is job-scoped, so both parties are
+        // needed from the first beat, not just at the interpolation step.
+        let job = db.Jobs.AsNoTracking().Single(fun j -> j.Id = jobId)
 
         do! pause ()
-        do! hub.Notify "Provider Accepted"
+        do! hub.NotifyJob ("Provider Accepted", job.CustomerId, job.ProviderId)
         do! apply Accepted
         do! pause ()
         do! apply DepartEnRoute
         // interpolate provider toward the job location in 5 steps
-        let job = db.Jobs.AsNoTracking().Single(fun j -> j.Id = jobId)
         let prov = db.Providers.Single(fun p -> p.Id = job.ProviderId)
         let startLat, startLng = prov.Lat, prov.Lng
         for i in 1 .. 5 do
@@ -49,25 +51,27 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
                       UpdatedAt = FixItHere.Backend.Seed.nowIso () }
             if i = 2 then
                 do! hub.MessageReceived
-                        { Id = 0; JobId = jobId; SenderId = job.CustomerId
-                          SenderRole = "Customer"; SenderName = "Customer"
-                          Text = "Hi!"; PhotoBase64 = null
-                          SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false }
+                        ({ Id = 0; JobId = jobId; SenderId = job.CustomerId
+                           SenderRole = "Customer"; SenderName = "Customer"
+                           Text = "Hi!"; PhotoBase64 = null
+                           SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false },
+                         job.CustomerId, job.ProviderId)
             if i = 3 then
                 do! hub.MessageReceived
-                        { Id = 0; JobId = jobId; SenderId = job.ProviderId
-                          SenderRole = "Provider"; SenderName = "Provider"
-                          Text = "On my way."; PhotoBase64 = null
-                          SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false }
+                        ({ Id = 0; JobId = jobId; SenderId = job.ProviderId
+                           SenderRole = "Provider"; SenderName = "Provider"
+                           Text = "On my way."; PhotoBase64 = null
+                           SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false },
+                         job.CustomerId, job.ProviderId)
         do! pause ()
-        do! hub.Notify "Provider Arriving"
+        do! hub.NotifyJob ("Provider Arriving", job.CustomerId, job.ProviderId)
         do! apply Arrive
         do! pause ()
         do! apply StartWork
         do! pause ()
         do! apply CompleteWork
         do! pause ()
-        do! hub.Notify "Payment Complete"
+        do! hub.NotifyJob ("Payment Complete", job.CustomerId, job.ProviderId)
         db.Ratings.Add
             { Id = 0; JobId = jobId
               RaterId = job.CustomerId; RaterRole = "Customer"

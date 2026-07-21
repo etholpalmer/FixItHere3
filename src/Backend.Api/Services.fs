@@ -7,18 +7,23 @@ open FixItHere.Shared.Dtos
 open FixItHere.Backend.Db
 
 type IBroadcaster =
+    /// JobDto carries both parties, so this targets without a lookup.
     abstract JobUpdated: JobDto -> Task
-    abstract MessageReceived: MessageDto -> Task
+    /// MessageDto carries only the sender, so the caller — which already has the
+    /// job in hand — passes both parties rather than making this re-query.
+    abstract MessageReceived: MessageDto * customerId: int * providerId: int -> Task
+    /// Notifications are about a job, so they go to that job's parties. A bare
+    /// broadcast toasted every connected client with other people's events.
+    abstract NotifyJob: text: string * customerId: int * providerId: int -> Task
     abstract LocationUpdated: LocationDto -> Task
-    abstract Notify: string -> Task
     abstract ProviderUpdated: ProviderDto -> Task
 
 type NullBroadcaster() =
     interface IBroadcaster with
         member _.JobUpdated _ = Task.CompletedTask
-        member _.MessageReceived _ = Task.CompletedTask
+        member _.MessageReceived (_, _, _) = Task.CompletedTask
+        member _.NotifyJob (_, _, _) = Task.CompletedTask
         member _.LocationUpdated _ = Task.CompletedTask
-        member _.Notify _ = Task.CompletedTask
         member _.ProviderUpdated _ = Task.CompletedTask
 
 let toJobDto (db: AppDb) (j: Job) : JobDto =

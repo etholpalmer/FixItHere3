@@ -20,8 +20,14 @@ type HubClient(baseUrl: string) =
             TaskContinuationOptions.ExecuteSynchronously)
         |> ignore
 
+    /// `role`/`userId` identify this actor to the server so it can be put in a
+    /// group and receive only its own job traffic. Rejoining after a reconnect is
+    /// handled here rather than by callers: SignalR does not preserve group
+    /// membership across a reconnect, and a caller that forgets produces an app
+    /// that looks connected while silently receiving nothing.
     member _.Start
-        (onJob: JobDto -> unit, onMessage: MessageDto -> unit,
+        (role: string, userId: int,
+         onJob: JobDto -> unit, onMessage: MessageDto -> unit,
          onLocation: LocationDto -> unit, onNotification: string -> unit,
          onTyping: int * int * string -> unit, onSeen: int * int * string -> unit,
          onProvider: ProviderDto -> unit) : Task =
@@ -32,7 +38,14 @@ type HubClient(baseUrl: string) =
         conn.On<ProviderDto>("ProviderUpdated", onProvider) |> ignore
         conn.On<int, int, string>("Typing", fun j s r -> onTyping (j, s, r)) |> ignore
         conn.On<int, int, string>("Seen", fun j s r -> onSeen (j, s, r)) |> ignore
-        conn.StartAsync()
+        // F# cannot use .Add here — SignalR's Reconnected is a Func<string,Task>,
+        // not an F# event (FS1091). Use the explicit add_ accessor.
+        conn.add_Reconnected(fun _ ->
+            conn.InvokeAsync("JoinActor", role, userId) :> Task)
+        task {
+            do! conn.StartAsync()
+            do! conn.InvokeAsync("JoinActor", role, userId)
+        } :> Task
 
     member _.SendTyping (jobId: int) (senderId: int) (senderRole: string) : unit =
         if conn.State = HubConnectionState.Connected then
