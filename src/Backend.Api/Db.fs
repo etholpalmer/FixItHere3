@@ -7,7 +7,7 @@ open FixItHere.Shared
 type Service = { Id: int; Name: string }
 
 [<CLIMutable>]
-type Customer = { Id: int; Name: string; Email: string; Lat: float; Lng: float }
+type Customer = { Id: int; Name: string; Email: string; Address: string; Lat: float; Lng: float }
 
 [<CLIMutable>]
 type Provider =

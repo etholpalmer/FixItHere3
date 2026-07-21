@@ -97,6 +97,6 @@ let mapAll (app: WebApplication) =
                     svc.Create
                         { CustomerId = cust.Id; ProviderId = prov.Id; ServiceId = prov.ServiceId
                           ScheduleChoice = "Now"; Lat = cust.Lat; Lng = cust.Lng
-                          Address = "Demo location" }
+                          Address = cust.Address }
                 runTimeline sp dto.Id |> ignore   // fire-and-forget scripted timeline
                 return okJson dto })) |> ignore

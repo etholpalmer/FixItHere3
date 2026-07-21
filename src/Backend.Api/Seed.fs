@@ -15,9 +15,13 @@ let nowIso () = DateTimeOffset.UtcNow.ToString("o")
 /// Deterministic: fixed name lists, Random(42), fixed epoch. No wall clock.
 let run (db: AppDb) =
     let rng = Random(42)
-    // GTA-ish bounding box for coordinates
-    let lat () = 43.55 + rng.NextDouble() * 0.30
-    let lng () = -79.75 + rng.NextDouble() * 0.55
+    // Coordinates come from Places.all — real GTA addresses, all inland. The
+    // previous uniform bounding box put ~15-18% of everything in Lake Ontario,
+    // and jobs inherit their customer's point, so the defect duplicated.
+    // Customers take the first 20 anchors, providers the next 20, so no
+    // provider is ever standing exactly on a customer's doorstep.
+    let customerPlace i = Places.at i
+    let providerPlace i = Places.at (i + 20)
 
     let services =
         ServiceNames.all |> List.map (fun n -> { Id = 0; Name = n })
@@ -31,7 +35,9 @@ let run (db: AppDb) =
           "Jack"; "Karen"; "Leo"; "Mona"; "Nate"
           "Olive"; "Paul"; "Quinn"; "Rita"; "Sam" ]
     db.Customers.AddRange(customerNames |> List.mapi (fun i n ->
-        { Id = 0; Name = n; Email = Auth.customerEmail i n; Lat = lat (); Lng = lng () })) |> ignore
+        let place = customerPlace i
+        { Id = 0; Name = n; Email = Auth.customerEmail i n
+          Address = Places.fullAddress place; Lat = place.Lat; Lng = place.Lng })) |> ignore
 
     let namedProviders =
         [ "Mike's Plumbing", "Plumbing", "White van"
@@ -50,9 +56,10 @@ let run (db: AppDb) =
     let providers =
         (namedProviders |> List.map (fun (b, s, v) -> b, s, v))
         @ (fillerProviders |> List.map (fun (b, s) -> b, s, "Van"))
-    db.Providers.AddRange(providers |> List.map (fun (biz, s, vehicle) ->
+    db.Providers.AddRange(providers |> List.mapi (fun i (biz, s, vehicle) ->
+        let place = providerPlace i
         { Id = 0; BusinessName = biz; Email = Auth.providerEmail biz; ServiceId = (svc s).Id
-          Lat = lat (); Lng = lng (); Online = true
+          Lat = place.Lat; Lng = place.Lng; Online = true
           Vehicle = vehicle; PhotoUrl = sprintf "/img/provider-%d.png" (rng.Next(1, 9)) })) |> ignore
     db.SaveChanges() |> ignore
 
@@ -66,7 +73,7 @@ let run (db: AppDb) =
           Price = decimal (40 + rng.Next(0, 25) * 5)
           ScheduledFor = DateTimeOffset.Parse(Epoch).AddHours(float i).ToString("o")
           Lat = c.Lat; Lng = c.Lng
-          Address = sprintf "%d Demo Street" (100 + i) }
+          Address = c.Address }
     // 50 finished (alternate Completed/Closed), 30 pending
     let finished = [ for i in 0 .. 49 -> mkJob i (if i % 2 = 0 then "Closed" else "Completed") ]
     let pending  = [ for i in 50 .. 79 -> mkJob i "Scheduled" ]

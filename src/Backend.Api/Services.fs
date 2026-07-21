@@ -56,12 +56,21 @@ type JobService(db: AppDb, hub: IBroadcaster) =
     member _.Create (req: CreateJobRequest) : Task<JobDto> =
         task {
             let prov = db.Providers.Single(fun p -> p.Id = req.ProviderId)
+            // The app cannot know the customer's street address — it only has a
+            // coordinate — so it sends the placeholder "My location" and the
+            // customer record supplies the real one. Without this a booked job
+            // reads "Address: My location" on the provider's screen, which is
+            // the one job the demo audience actually watches.
+            let cust = db.Customers.SingleOrDefault(fun c -> c.Id = req.CustomerId)
+            let resolvedAddress, resolvedLat, resolvedLng =
+                if obj.ReferenceEquals(cust, null) then req.Address, req.Lat, req.Lng
+                else cust.Address, cust.Lat, cust.Lng
             let job =
                 { Id = 0; CustomerId = req.CustomerId; ProviderId = req.ProviderId
                   ServiceId = req.ServiceId; State = "Scheduled"
                   Price = 85.00m
                   ScheduledFor = req.ScheduleChoice
-                  Lat = req.Lat; Lng = req.Lng; Address = req.Address }
+                  Lat = resolvedLat; Lng = resolvedLng; Address = resolvedAddress }
             ignore prov
             db.Jobs.Add job |> ignore
             db.SaveChanges() |> ignore
