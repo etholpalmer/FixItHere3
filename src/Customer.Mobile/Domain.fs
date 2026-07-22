@@ -192,3 +192,41 @@ module Nav =
         | prev :: rest -> { m with Screen = prev; History = rest }
         | [] -> { m with Screen = Home; History = [] }
     let resetTo (s: Screen) (m: Model) = { m with Screen = s; History = [] }
+
+[<AutoOpen>]
+module Domain =
+    /// The job's reschedule sub-status, rebuilt from the flat wire fields.
+    /// Empty strings are the absent case — see Dtos.JobDto for why the wire is
+    /// flat rather than nested.
+    let rescheduleOf (j: JobDto) : Reschedule =
+        let parse (s: string) =
+            match DateTimeOffset.TryParse(s, Globalization.CultureInfo.InvariantCulture,
+                                          Globalization.DateTimeStyles.RoundtripKind) with
+            | true, v -> Some v
+            | _ -> None
+        let promised =
+            parse j.PromisedStart
+            |> Option.orElseWith (fun () -> parse j.ScheduledFor)
+            |> Option.defaultValue DemoClock.epoch
+        let pending =
+            match parse j.ProposedStart, ActorRole.ofWire j.ProposedBy, parse j.ProposalExpiresAt with
+            | Some at, Some by, Some expires ->
+                Some { ProposedStart = at; By = by; Reason = j.ProposalReason; ExpiresAt = expires }
+            | _ -> None
+        { PromisedStart = promised; Pending = pending }
+
+    /// The countdown for a job, from the model's own DemoNow.
+    ///
+    /// Lives here rather than in a view so both Home and Tracking read the
+    /// identical number — the plan's asymmetry table exists because two views
+    /// computing "the same" fact independently is how they drift.
+    let countdownFor (m: Model) (j: JobDto) : Countdown option =
+        JobStateCodec.tryParse j.State
+        |> Option.bind (fun state ->
+            let sched = rescheduleOf j
+            // Live ETA only once the provider is actually moving and we have
+            // a position for them; otherwise the promise is the best estimate.
+            let eta =
+                m.ProviderPositions.TryFind j.ProviderId
+                |> Option.map (fun pos -> Travel.minutesFor (Geo.distanceKm pos (j.Lat, j.Lng)))
+            Countdown.forCustomer state sched eta m.DemoNow)

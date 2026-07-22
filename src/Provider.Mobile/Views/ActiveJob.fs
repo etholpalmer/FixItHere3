@@ -32,6 +32,17 @@ module private MapCache =
             cache[key] <- v
             v
 
+
+/// Urgency drives colour. A deadline that has passed must not look like one
+/// comfortably ahead — that is the entire reason `Countdown` carries a rank
+/// rather than just a string.
+let private urgencyColor (u: Urgency) =
+    match u with
+    | Urgency.Overdue -> Microsoft.Maui.Graphics.Color.FromRgb(0xB0, 0x2A, 0x2A)
+    | Urgency.Urgent -> Microsoft.Maui.Graphics.Color.FromRgb(0x9A, 0x5B, 0x0A)
+    | Urgency.Soon -> Microsoft.Maui.Graphics.Color.FromRgb(0x2B, 0x4D, 0x8A)
+    | Urgency.Calm -> Microsoft.Maui.Graphics.Color.FromRgb(0x3A, 0x3A, 0x42)
+
 let private statusLine (state: string) =
     match JobStateCodec.tryParse state with
     | Some s -> JobStatus.forProvider s
@@ -62,8 +73,17 @@ let view (model: Model) (jobId: int) =
                 (VStack(spacing = 4.) {
                     Button("← Back", GoBack)
                     Label(statusLine job.State).font(size = 20.)
+                    // The countdown is the headline, not a footnote: it is
+                    // the number this screen exists to show. One Label rather
+                    // than a nested HStack — Fabulous CE rejects nesting here.
+                    match countdownFor model job with
+                    | Some c ->
+                        Label(sprintf "%s %s" c.Label c.Value)
+                            .font(size = 22.)
+                            .textColor(urgencyColor c.Urgency)
+                    | None -> ()
                     Label(sprintf "%s — %s" job.CustomerName job.Address)
-                    Label(sprintf "$%M" job.Price)
+                    Label(Format.money job.Price)
                 }).gridRow(0)
                 WebView(HtmlWebViewSource(Html = MapCache.html Config.baseUrl job.Lat job.Lng job.ProviderId)).gridRow(1)
                 (HStack(spacing = 8.) {

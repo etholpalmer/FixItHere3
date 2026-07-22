@@ -401,3 +401,97 @@ let ``classification separates an alarm from an acknowledgement`` () =
     Assert.Equal(NoticeKind.Success, Notify.classify "Payment Complete")
     // Unrecognised text stays quiet rather than falsely alarming.
     Assert.Equal(NoticeKind.Info, Notify.classify "Something new happened")
+
+// ------------------------------------------------------------- Countdown ----
+
+let private booking (minutesAhead: float) =
+    Reschedule.ofBooking (DemoClock.epoch.AddMinutes minutesAhead)
+
+let private mustHave (c: Countdown option) =
+    match c with Some v -> v | None -> failwith "expected a countdown, got none"
+
+[<Fact>]
+let ``the two sides count down to different things at the same instant`` () =
+    // The whole point of the module. "Arriving in 30:00" and "Leave in 15:00"
+    // are the same job at the same moment, and each is the only number that
+    // changes its reader's behaviour.
+    let r = booking 30.0
+    let cust = mustHave (Countdown.forCustomer Scheduled r None DemoClock.epoch)
+    // 8 km at 32 km/h is a 15-minute drive, so departure is 15 minutes out.
+    let prov = mustHave (Countdown.forProvider Scheduled r (Some 8.0) DemoClock.epoch)
+    Assert.Equal("Arriving in", cust.Label)
+    Assert.Equal("Leave in", prov.Label)
+    Assert.NotEqual<string>(cust.Value, prov.Value)
+
+[<Fact>]
+let ``once the provider should have left, the number becomes the deadline`` () =
+    let r = booking 30.0
+    // Ten minutes in, a 15-minute drive means departure has passed.
+    let late = DemoClock.epoch.AddMinutes 20.0
+    let prov = mustHave (Countdown.forProvider Scheduled r (Some 8.0) late)
+    Assert.StartsWith("Leave now", prov.Label)
+    Assert.Equal(Urgency.Urgent, prov.Urgency)
+
+[<Fact>]
+let ``past the promise the provider is told when it becomes reportable`` () =
+    let r = booking 30.0
+    let after = DemoClock.epoch.AddMinutes 35.0
+    let prov = mustHave (Countdown.forProvider Scheduled r (Some 8.0) after)
+    Assert.Contains("no-show", prov.Label)
+    Assert.Equal(Urgency.Overdue, prov.Urgency)
+    // Counting to the grace deadline, not to the promise already missed.
+    Assert.Equal(Format.countdown (Reschedule.noShowDeadline r - after), prov.Value)
+
+[<Fact>]
+let ``a live ETA that cannot make the promise is shown as overdue`` () =
+    // The reconciliation the plan asked for: a provider already behind does
+    // not become on time by driving fast, and the screen must not show a
+    // rosier number than the one both parties agreed to.
+    let r = booking 10.0
+    let onTime = mustHave (Countdown.forCustomer EnRoute r (Some 5.0) DemoClock.epoch)
+    Assert.NotEqual(Urgency.Overdue, onTime.Urgency)
+    let cannotMakeIt = mustHave (Countdown.forCustomer EnRoute r (Some 25.0) DemoClock.epoch)
+    Assert.Equal(Urgency.Overdue, cannotMakeIt.Urgency)
+
+[<Fact>]
+let ``a pending proposal outranks the job's own countdown, for both parties`` () =
+    // It has its own deadline, and lapsing unanswered is the one outcome
+    // nobody chose.
+    let r = booking 60.0
+    let pending, _ =
+        mustOk (Reschedule.apply DemoClock.epoch r
+                    (Propose { ProposedStart = r.PromisedStart.AddMinutes 15.0
+                               By = ActorRole.Provider
+                               Reason = "Traffic"
+                               ExpiresAt = DemoClock.epoch + Reschedule.proposalWindow }))
+    let cust = mustHave (Countdown.forCustomer Scheduled pending None DemoClock.epoch)
+    let prov = mustHave (Countdown.forProvider Scheduled pending (Some 8.0) DemoClock.epoch)
+    Assert.Contains("proposed", cust.Label)
+    Assert.Contains("Awaiting", prov.Label)
+    // Urgent regardless of the clock: an unanswered question is not calm.
+    Assert.Equal(Urgency.Urgent, cust.Urgency)
+    Assert.Equal(Urgency.Urgent, prov.Urgency)
+
+[<Fact>]
+let ``states with nothing to wait for show no countdown at all`` () =
+    // A stale clock on a finished job is worse than no clock.
+    let r = booking 30.0
+    for st in [ Arrived; InProgress; Completed; Closed; Cancelled; ProviderNoShow ] do
+        Assert.True((Countdown.forCustomer st r None DemoClock.epoch).IsNone, JobStateCodec.ofState st)
+        Assert.True((Countdown.forProvider st r (Some 8.0) DemoClock.epoch).IsNone, JobStateCodec.ofState st)
+
+[<Property>]
+let ``urgency only ever escalates as demo time advances`` (aheadSeed: int) (stepSeed: int) =
+    // Guards the readout against ever relaxing on its own — a countdown that
+    // goes from Urgent back to Calm reads as a bug even when the number is
+    // right.
+    let r = booking (1.0 + float (abs aheadSeed % 120))
+    let step = float (abs stepSeed % 30)
+    let rank u = match u with
+                 | Urgency.Calm -> 0 | Urgency.Soon -> 1
+                 | Urgency.Urgent -> 2 | Urgency.Overdue -> 3
+    let earlier = Countdown.forCustomer Scheduled r None DemoClock.epoch
+    let later = Countdown.forCustomer Scheduled r None (DemoClock.epoch.AddMinutes step)
+    match earlier, later with
+    | Some a, Some b -> rank b.Urgency >= rank a.Urgency
+    | _ -> true

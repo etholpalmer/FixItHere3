@@ -208,6 +208,38 @@ module Nav =
 
 [<AutoOpen>]
 module Domain =
+    /// The job's reschedule sub-status, rebuilt from the flat wire fields.
+    /// Empty strings are the absent case — see Dtos.JobDto for why the wire is
+    /// flat rather than nested.
+    let rescheduleOf (j: JobDto) : Reschedule =
+        let parse (s: string) =
+            match DateTimeOffset.TryParse(s, Globalization.CultureInfo.InvariantCulture,
+                                          Globalization.DateTimeStyles.RoundtripKind) with
+            | true, v -> Some v
+            | _ -> None
+        let promised =
+            parse j.PromisedStart
+            |> Option.orElseWith (fun () -> parse j.ScheduledFor)
+            |> Option.defaultValue DemoClock.epoch
+        let pending =
+            match parse j.ProposedStart, ActorRole.ofWire j.ProposedBy, parse j.ProposalExpiresAt with
+            | Some at, Some by, Some expires ->
+                Some { ProposedStart = at; By = by; Reason = j.ProposalReason; ExpiresAt = expires }
+            | _ -> None
+        { PromisedStart = promised; Pending = pending }
+
+    /// The countdown for a job, from the model's own DemoNow. Provider-side:
+    /// while a job is only Scheduled the useful number is when to *leave*, not
+    /// when they are expected.
+    let countdownFor (m: Model) (j: JobDto) : Countdown option =
+        JobStateCodec.tryParse j.State
+        |> Option.bind (fun state ->
+            // The provider app knows its *own* position directly — it is the
+            // one pushing it — so there is no positions map to consult.
+            let km = Some (Geo.distanceKm m.MyLocation (j.Lat, j.Lng))
+            Countdown.forProvider state (rescheduleOf j) km m.DemoNow)
+
+
     /// The single job currently being worked (spec: one Active Job at a time).
     ///
     /// The in-flight set lives in Shared and is exhaustive over JobState, so a
