@@ -64,6 +64,22 @@ let mapAll (app: WebApplication) =
                          UserId = p.Id; Role = "Provider"; DisplayName = p.BusinessName }
         | r -> err 400 (sprintf "Unknown role %s" r))) |> ignore
 
+    // Avatars are generated, not served from disk: the seed used to point at
+    // /img/provider-N.png files that were never shipped, so every avatar 404'd.
+    // Generating them means a valid id can never miss.
+    let avatarResult (name: string option) =
+        match name with
+        | Some n -> Results.Content(Auth.avatarSvg n, "image/svg+xml")
+        | None -> Results.Content(Auth.avatarSvg "?", "image/svg+xml")
+
+    app.MapGet("/avatar/provider/{id}.svg", Func<AppDb, int, IResult>(fun db id ->
+        db.Providers.SingleOrDefault(fun p -> p.Id = id) |> Option.ofObj
+        |> Option.map (fun p -> p.BusinessName) |> avatarResult)) |> ignore
+
+    app.MapGet("/avatar/customer/{id}.svg", Func<AppDb, int, IResult>(fun db id ->
+        db.Customers.SingleOrDefault(fun c -> c.Id = id) |> Option.ofObj
+        |> Option.map (fun c -> c.Name) |> avatarResult)) |> ignore
+
     app.MapGet("/customers", Func<AppDb, IResult>(fun db ->
         okJson (db.Customers.OrderBy(fun c -> c.Id)
                 |> Seq.map (fun c -> { Id = c.Id; Name = c.Name; Email = c.Email })
@@ -198,10 +214,18 @@ let mapAll (app: WebApplication) =
         // public feedback, so ratings about a customer must not appear here.
         okJson (db.Ratings.Where(fun r -> r.RateeId = providerId && r.RateeRole = "Provider")
                 |> Seq.map (fun r ->
+                    // Resolve by (id, role): the two id spaces overlap.
+                    let raterName =
+                        if r.RaterRole = "Provider" then
+                            db.Providers.SingleOrDefault(fun p -> p.Id = r.RaterId) |> Option.ofObj
+                            |> Option.map (fun p -> p.BusinessName) |> Option.defaultValue "Unknown"
+                        else
+                            db.Customers.SingleOrDefault(fun c -> c.Id = r.RaterId) |> Option.ofObj
+                            |> Option.map (fun c -> c.Name) |> Option.defaultValue "Unknown"
                     { Id = r.Id; JobId = r.JobId
-                      RaterId = r.RaterId; RaterRole = r.RaterRole
+                      RaterId = r.RaterId; RaterRole = r.RaterRole; RaterName = raterName
                       RateeId = r.RateeId; RateeRole = r.RateeRole
-                      Stars = r.Stars; Comment = r.Comment })
+                      Stars = r.Stars; Comment = r.Comment; CreatedAt = r.CreatedAt })
                 |> List.ofSeq))) |> ignore
 
     app.MapPost("/ratings", Func<CreateRatingRequest, AppDb, JobService, System.Threading.Tasks.Task<IResult>>(
@@ -214,7 +238,8 @@ let mapAll (app: WebApplication) =
                 { Id = 0; JobId = req.JobId
                   RaterId = req.RaterId; RaterRole = norm req.RaterRole
                   RateeId = req.RateeId; RateeRole = norm req.RateeRole
-                  Stars = req.Stars; Comment = req.Comment }
+                  Stars = req.Stars; Comment = req.Comment
+                  CreatedAt = Seed.nowIso () }
             db.Ratings.Add rating |> ignore
             db.SaveChanges() |> ignore
             // Rating a completed job closes it (simplified single-sided close for the demo)
@@ -225,9 +250,10 @@ let mapAll (app: WebApplication) =
             let saved = db.Ratings.OrderByDescending(fun r -> r.Id).First()
             return okJson
                 { Id = saved.Id; JobId = saved.JobId
-                  RaterId = saved.RaterId; RaterRole = saved.RaterRole
+                  RaterId = saved.RaterId; RaterRole = saved.RaterRole; RaterName = ""
                   RateeId = saved.RateeId; RateeRole = saved.RateeRole
-                  Stars = saved.Stars; Comment = saved.Comment } })) |> ignore
+                  Stars = saved.Stars; Comment = saved.Comment
+                  CreatedAt = saved.CreatedAt } })) |> ignore
 
     app.MapGet("/location", Func<AppDb, int, IResult>(fun db providerId ->
         match db.Providers.SingleOrDefault(fun p -> p.Id = providerId) |> Option.ofObj with
@@ -254,5 +280,32 @@ let mapAll (app: WebApplication) =
             match db.Jobs.SingleOrDefault(fun j -> j.Id = req.JobId) |> Option.ofObj with
             | None -> return err 404 (sprintf "Job %d not found" req.JobId)
             | Some job ->
+                let serviceName =
+                    db.Services.SingleOrDefault(fun s -> s.Id = job.ServiceId) |> Option.ofObj
+                    |> Option.map (fun s -> s.Name) |> Option.defaultValue ""
+                let rate = ServiceRate.forService serviceName
+                // Derive the lines *from the agreed price* rather than recomputing
+                // the quote: the receipt must reconcile to what the customer was
+                // shown at booking, even if the rate card later changes.
+                let callOut = min rate.CallOutFee job.Price
+                let labour = job.Price - callOut
+                // Recover the *billed* minutes from the labour amount rather than
+                // quoting the trade's typical duration: the seed jitters duration
+                // around the typical, so "Labour (1h 30m) $206.25" at $125/h is a
+                // line a careful reader can catch not adding up.
+                let labourMinutes =
+                    if rate.HourlyRate <= 0m then 0
+                    else int (System.Math.Round(labour / rate.HourlyRate * 60m))
+                let lines = Money.breakdown callOut labourMinutes labour
+                let card =
+                    db.Customers.SingleOrDefault(fun c -> c.Id = job.CustomerId) |> Option.ofObj
+                    |> Option.map (fun c -> sprintf "%s ****%s" c.CardBrand c.CardLast4)
+                    |> Option.defaultValue "Card on file"
                 do! hub.NotifyJob ("Payment Complete", job.CustomerId, job.ProviderId)
-                return okJson { JobId = job.Id; Amount = job.Price; Status = "Transferred" } })) |> ignore
+                return okJson
+                    { JobId = job.Id
+                      CallOutFee = lines.CallOutFee; LabourMinutes = lines.LabourMinutes
+                      LabourAmount = lines.LabourAmount
+                      Subtotal = lines.Subtotal; Tax = lines.Tax; Amount = lines.Total
+                      PlatformFee = lines.PlatformFee; ProviderPayout = lines.ProviderPayout
+                      Method = card; Status = "Transferred" } })) |> ignore

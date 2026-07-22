@@ -68,8 +68,12 @@ type SendMessageRequest =
 type RatingDto =
     { Id: int; JobId: int
       RaterId: int; RaterRole: string
+      /// Resolved for display. A review with no author and no date reads as
+      /// filler; "Mary O. · 12 Jan" reads as a person.
+      RaterName: string
       RateeId: int; RateeRole: string
-      Stars: int; Comment: string }
+      Stars: int; Comment: string
+      CreatedAt: string }
 
 [<CLIMutable>]
 type CreateRatingRequest =
@@ -88,4 +92,22 @@ type UpdateLocationRequest = { ProviderId: int; Lat: float; Lng: float }
 type PaymentRequest = { JobId: int }
 
 [<CLIMutable>]
-type PaymentResult = { JobId: int; Amount: decimal; Status: string }
+/// A receipt that shows its working. The screen previously displayed a single
+/// number with no breakdown — no card, no fee, no payout — which is the missing
+/// organ in a *marketplace* pitch: the investor is buying the take rate.
+type PaymentResult =
+    { JobId: int
+      CallOutFee: decimal
+      LabourMinutes: int
+      LabourAmount: decimal
+      Subtotal: decimal
+      /// Ontario HST, on the customer side of the ledger.
+      Tax: decimal
+      /// What the customer is charged.
+      Amount: decimal
+      /// The marketplace's cut of the subtotal.
+      PlatformFee: decimal
+      /// Subtotal less the platform fee — what the provider actually receives.
+      ProviderPayout: decimal
+      Method: string
+      Status: string }

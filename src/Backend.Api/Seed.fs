@@ -29,15 +29,23 @@ let run (db: AppDb) =
     db.SaveChanges() |> ignore
     let svc name = db.Services.Local |> Seq.find (fun s -> s.Name = name)
 
+    // Full names, and a Toronto-plausible mix of them. First-name-only customers
+    // ("John", "Mary") read as seed data the moment they appear next to a real
+    // street address.
     let customerNames =
-        [ "John"; "Mary"; "Steve"; "Susan"; "Bob"
-          "Alice"; "Tom"; "Grace"; "Henry"; "Ivy"
-          "Jack"; "Karen"; "Leo"; "Mona"; "Nate"
-          "Olive"; "Paul"; "Quinn"; "Rita"; "Sam" ]
+        [ "John Reyes"; "Mary Okonkwo"; "Steve Lindqvist"; "Susan Chaudhry"; "Bob Tremblay"
+          "Alice Nakamura"; "Tom Belanger"; "Grace Adeyemi"; "Henry Vasquez"; "Ivy Chen"
+          "Jack O'Brien"; "Karen Silva"; "Leo Mancini"; "Mona Haddad"; "Nate Fitzgerald"
+          "Olive Kowalski"; "Paul Dhillon"; "Quinn Gallagher"; "Rita Moreau"; "Sam Petrov" ]
     db.Customers.AddRange(customerNames |> List.mapi (fun i n ->
         let place = customerPlace i
         { Id = 0; Name = n; Email = Auth.customerEmail i n
-          Address = Places.fullAddress place; Lat = place.Lat; Lng = place.Lng })) |> ignore
+          Address = Places.fullAddress place
+          // Well-known test numbers, last four only — a receipt can name a card
+          // without inventing plausible-looking PANs.
+          CardBrand = (if i % 3 = 0 then "Visa" elif i % 3 = 1 then "Mastercard" else "Amex")
+          CardLast4 = (if i % 3 = 0 then "4242" elif i % 3 = 1 then "4444" else "0005")
+          Lat = place.Lat; Lng = place.Lng })) |> ignore
 
     let namedProviders =
         [ "Mike's Plumbing", "Plumbing", "White van"
@@ -60,7 +68,10 @@ let run (db: AppDb) =
         let place = providerPlace i
         { Id = 0; BusinessName = biz; Email = Auth.providerEmail biz; ServiceId = (svc s).Id
           Lat = place.Lat; Lng = place.Lng; Online = true
-          Vehicle = vehicle; PhotoUrl = sprintf "/img/provider-%d.png" (rng.Next(1, 9)) })) |> ignore
+          // Server-rendered initials rather than a file path. The old
+          // "/img/provider-N.png" pointed at images that were never shipped, so
+          // every avatar 404'd the moment a view tried to render one.
+          Vehicle = vehicle; PhotoUrl = sprintf "/avatar/provider/%d.svg" (i + 1) })) |> ignore
     db.SaveChanges() |> ignore
 
     let customers = db.Customers.Local |> Seq.toArray
@@ -95,7 +106,10 @@ let run (db: AppDb) =
         { Id = 0; JobId = j.Id
           RaterId = j.CustomerId; RaterRole = "Customer"
           RateeId = j.ProviderId; RateeRole = "Provider"
-          Stars = 3 + rng.Next(0, 3); Comment = comments.[rng.Next(comments.Length)] })) |> ignore
+          Stars = 3 + rng.Next(0, 3); Comment = comments.[rng.Next(comments.Length)]
+          // Reviews are dated relative to the fixed Epoch, so the seed stays
+          // byte-identical while each review still carries a plausible date.
+          CreatedAt = DateTimeOffset.Parse(Epoch).AddDays(float -(j.Id % 60)).ToString("o") })) |> ignore
 
     db.Messages.AddRange(doneJobs |> List.truncate 20 |> List.map (fun j ->
         { Id = 0; JobId = j.Id; SenderId = j.CustomerId; SenderRole = "Customer"

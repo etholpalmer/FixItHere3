@@ -7,7 +7,12 @@ open FixItHere.Shared
 type Service = { Id: int; Name: string }
 
 [<CLIMutable>]
-type Customer = { Id: int; Name: string; Email: string; Address: string; Lat: float; Lng: float }
+type Customer =
+    { Id: int; Name: string; Email: string; Address: string
+      /// Last four digits only, and a well-known test number — enough for a
+      /// receipt to name a card without inventing plausible-looking PANs.
+      CardBrand: string; CardLast4: string
+      Lat: float; Lng: float }
 
 [<CLIMutable>]
 type Provider =
@@ -30,7 +35,8 @@ type Rating =
     { Id: int; JobId: int
       RaterId: int; RaterRole: string
       RateeId: int; RateeRole: string
-      Stars: int; Comment: string }
+      Stars: int; Comment: string
+      CreatedAt: string }
 
 module JobStateCodec =
     let ofState (s: JobState) = sprintf "%A" s

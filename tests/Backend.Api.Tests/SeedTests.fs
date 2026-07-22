@@ -25,7 +25,9 @@ let ``named personas exist with correct services`` () =
     let db, conn = makeDb ()
     use _ = conn
     Seed.run db
-    for name in ["John"; "Mary"; "Steve"; "Susan"; "Bob"] do
+    // Full names, not first names: a roster of "John, Mary, Steve" reads as
+    // seed data the moment a second screen shows it.
+    for name in ["John Reyes"; "Mary Okonkwo"; "Steve Lindqvist"; "Susan Chaudhry"; "Bob Tremblay"] do
         Assert.True(db.Customers.Any(fun c -> c.Name = name), name)
     let svcId name = db.Services.Single(fun s -> s.Name = name).Id
     let check biz svc =

@@ -24,9 +24,10 @@ dotnet build -t:Run -f net10.0-ios src/Customer.Mobile
 ```
 
 Requires the backend running (above). The sign-in form is prefilled with the
-primary demo account — `john@gmail.com` / `Customer1!` — so it is one tap. Other
-seeded customers follow the same shape (`mary@outlook.com`, `steve@icloud.com`,
-`susan@yahoo.ca`, `bob@gmail.com`); `GET /customers` lists them all.
+primary demo account — `john.reyes@gmail.com` / `Customer1!` — so it is one tap. Other
+seeded customers follow the same `first.last@domain` shape
+(`mary.okonkwo@outlook.com`, `steve.lindqvist@icloud.com`,
+`susan.chaudhry@yahoo.ca`, `bob.tremblay@gmail.com`); `GET /customers` lists them all.
 Use the /dev console as the "provider side" to accept/drive jobs, or press
 Start Demo there for the fully scripted flow.
 

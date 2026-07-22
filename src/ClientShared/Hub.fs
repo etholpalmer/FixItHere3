@@ -41,7 +41,7 @@ type HubClient(baseUrl: string) =
         // F# cannot use .Add here — SignalR's Reconnected is a Func<string,Task>,
         // not an F# event (FS1091). Use the explicit add_ accessor.
         conn.add_Reconnected(fun _ ->
-            conn.InvokeAsync("JoinActor", role, userId) :> Task)
+            conn.InvokeAsync("JoinActor", role, userId))
         task {
             do! conn.StartAsync()
             do! conn.InvokeAsync("JoinActor", role, userId)

@@ -76,7 +76,8 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
             { Id = 0; JobId = jobId
               RaterId = job.CustomerId; RaterRole = "Customer"
               RateeId = job.ProviderId; RateeRole = "Provider"
-              Stars = 5; Comment = "Great demo!" } |> ignore
+              Stars = 5; Comment = "Great demo!"
+              CreatedAt = Seed.nowIso () } |> ignore
         db.SaveChanges() |> ignore
         do! apply RateAndClose
     } :> Task

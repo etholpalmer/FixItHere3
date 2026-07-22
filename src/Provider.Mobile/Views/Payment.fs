@@ -3,6 +3,7 @@ module FixItHere.Provider.Views.Payment
 open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Provider
+open FixItHere.Shared
 
 let view (model: Model) (jobId: int) =
     (VStack(spacing = 16.) {
@@ -12,15 +13,25 @@ let view (model: Model) (jobId: int) =
             ActivityIndicator(true)
             Label("Processing…").centerTextHorizontal()
         | Some r ->
-            let receipt =
-                (VStack(spacing = 4.) {
-                    Label("— Receipt —").centerTextHorizontal()
-                    Label(sprintf "Job #%d" r.JobId).centerTextHorizontal()
-                    Label(sprintf "Status: %s" r.Status).centerTextHorizontal()
+            let line (label: string) (value: string) =
+                (Grid(coldefs = [ Star; Auto ], rowdefs = [ Auto ]) {
+                    Label(label).gridColumn(0)
+                    Label(value).gridColumn(1)
                 })
 
-            Label("✓ Payment Received").font(size = 28.).centerTextHorizontal()
-            Label(sprintf "$%.2f" (float r.Amount)).font(size = 40.).centerTextHorizontal()
-            receipt
+            // The provider's headline number is their payout, not the customer's
+            // total — showing the same figure on both screens is the tell that
+            // there is no marketplace behind them.
+            Label("✓ Payout").font(size = 28.).centerTextHorizontal()
+            Label(Format.money r.ProviderPayout).font(size = 40.).centerTextHorizontal()
+            VStack(spacing = 6.) {
+                Label("Earnings").font(size = 16.)
+                line "Call-out fee" (Format.money r.CallOutFee)
+                line (sprintf "Labour (%s)" (Format.duration r.LabourMinutes)) (Format.money r.LabourAmount)
+                line "Subtotal" (Format.money r.Subtotal)
+                line "Platform fee (15%)" (sprintf "-%s" (Format.money r.PlatformFee))
+                line "Your payout" (Format.money r.ProviderPayout)
+                Label(sprintf "Job #%d · %s" r.JobId r.Status).font(size = 11.)
+            }
             Button("Rate customer", Navigate (RateCustomer jobId))
     }).centerVertical().padding(24.)

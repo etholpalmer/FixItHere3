@@ -3,6 +3,7 @@ module FixItHere.Customer.Views.Chat
 open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Customer
+open FixItHere.Shared
 
 let view (model: Model) (jobId: int) =
     let jobMessages = model.Messages |> List.filter (fun m -> m.JobId = jobId)
@@ -26,10 +27,13 @@ let view (model: Model) (jobId: int) =
                         if mine && Some m.Id = lastMineId
                            && (match model.SeenUpToMessageId with Some w -> m.Id <= w | None -> false)
                         then " ✓✓ seen" else ""
-                    if System.String.IsNullOrEmpty m.PhotoBase64 then
-                        Label(sprintf "%s: %s%s" prefix m.Text seenSuffix)
-                    else
-                        Label(sprintf "%s: [photo]%s" prefix seenSuffix)
+                    // A conversation with no clock reads as a transcript, not a chat.
+                    let stamp = Format.clockTime m.SentAt
+                    let body = if System.String.IsNullOrEmpty m.PhotoBase64 then m.Text else "[photo]"
+                    VStack(spacing = 0.) {
+                        Label(sprintf "%s: %s" prefix body)
+                        Label(sprintf "%s%s" stamp seenSuffix).font(size = 11.)
+                    }
                 if model.ProviderTyping then
                     Label("provider is typing…")
             })

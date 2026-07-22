@@ -6,6 +6,19 @@ open FixItHere.ClientShared
 open FixItHere.Customer
 open FixItHere.Shared.Dtos
 
+/// A receipt fixture built through the real `Money.breakdown`, so a change to
+/// the fee or tax rate updates these tests instead of silently disagreeing
+/// with what the app actually renders.
+let receipt (jobId: int) (subtotal: decimal) : PaymentResult =
+    let callOut = 90m
+    let lines = FixItHere.Shared.Money.breakdown callOut 90 (subtotal - callOut)
+    { JobId = jobId
+      CallOutFee = lines.CallOutFee; LabourMinutes = lines.LabourMinutes
+      LabourAmount = lines.LabourAmount
+      Subtotal = lines.Subtotal; Tax = lines.Tax; Amount = lines.Total
+      PlatformFee = lines.PlatformFee; ProviderPayout = lines.ProviderPayout
+      Method = "Visa ****4242"; Status = "Transferred" }
+
 [<Fact>]
 let ``push stores current screen in history`` () =
     let m = { Model.initial with Screen = Home }
@@ -135,13 +148,13 @@ let ``hub notification sets toast`` () =
 
 [<Fact>]
 let ``payment result stored`` () =
-    let r : PaymentResult = { JobId = 7; Amount = 85m; Status = "Transferred" }
+    let r : PaymentResult = receipt 7 85m
     Assert.Equal(Some r, (up (PaymentSimulated r) Model.initial).PaymentResult)
 
 [<Fact>]
 let ``rating submitted resets to Home and clears payment`` () =
     let m0 = { Model.initial with Screen = Rating 7; History = [Payment 7; Tracking 7; Home]
-                                  PaymentResult = Some { JobId = 7; Amount = 85m; Status = "Transferred" } }
+                                  PaymentResult = Some (receipt 7 85m) }
     let m = up RatingSubmitted m0
     Assert.Equal(Home, m.Screen)
     Assert.Empty(m.History)
@@ -194,7 +207,7 @@ let ``navigating to Payment clears any stale payment result`` () =
     let m0 =
         { Model.initial with
             Screen = Tracking 7
-            PaymentResult = Some { JobId = 3; Amount = 85m; Status = "Transferred" } }
+            PaymentResult = Some (receipt 3 85m) }
     let m = up (Navigate (Payment 7)) m0
     Assert.Equal(Payment 7, m.Screen)
     Assert.Equal(None, m.PaymentResult)

@@ -79,7 +79,7 @@ module Model =
           PaymentResult = None; FakeCallActive = false
           ChatDrafts = Map.empty; TypingToken = 0; ProviderTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           RatingStars = 5; RatingComment = ""
-          LoginEmail = "john@gmail.com"; LoginPassword = "Customer1!"; SigningIn = false
+          LoginEmail = "john.reyes@gmail.com"; LoginPassword = "Customer1!"; SigningIn = false
           Toast = None; Error = None }
 
 type Msg =

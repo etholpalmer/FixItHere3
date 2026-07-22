@@ -3,6 +3,7 @@ module FixItHere.Customer.Views.ProviderProfile
 open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Customer
+open FixItHere.Shared
 
 let view (model: Model) (providerId: int) =
     match model.Providers |> List.tryFind (fun p -> p.Id = providerId) with
@@ -17,5 +18,12 @@ let view (model: Model) (providerId: int) =
             Button("Book", Navigate (Booking (p.Id, p.ServiceId)))
             Label("Recent feedback").font(size = 18.)
             for r in model.ProfileRatings |> List.truncate 5 do
-                Label(sprintf "★%d  %s" r.Stars r.Comment)
+                // A review with no author and no date reads as filler.
+                VStack(spacing = 0.) {
+                    Label(sprintf "%s  %s · %s"
+                            (String.replicate r.Stars "★")
+                            (Format.displayName r.RaterName)
+                            (Format.shortDate r.CreatedAt)).font(size = 12.)
+                    Label(r.Comment)
+                }
         }).padding(24.)

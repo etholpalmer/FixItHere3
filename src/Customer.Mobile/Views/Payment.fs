@@ -3,6 +3,7 @@ module FixItHere.Customer.Views.Payment
 open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Customer
+open FixItHere.Shared
 
 let view (model: Model) (jobId: int) =
     (VStack(spacing = 16.) {
@@ -12,15 +13,23 @@ let view (model: Model) (jobId: int) =
             ActivityIndicator(true)
             Label("Processing…").centerTextHorizontal()
         | Some r ->
-            let receipt =
-                (VStack(spacing = 4.) {
-                    Label("— Receipt —").centerTextHorizontal()
-                    Label(sprintf "Job #%d" r.JobId).centerTextHorizontal()
-                    Label(sprintf "Status: %s" r.Status).centerTextHorizontal()
+            let line (label: string) (value: string) =
+                (Grid(coldefs = [ Star; Auto ], rowdefs = [ Auto ]) {
+                    Label(label).gridColumn(0)
+                    Label(value).gridColumn(1)
                 })
 
-            Label("✓ Transferred to Provider").font(size = 28.).centerTextHorizontal()
-            Label(sprintf "$%.2f" (float r.Amount)).font(size = 40.).centerTextHorizontal()
-            receipt
+            Label("✓ Paid").font(size = 28.).centerTextHorizontal()
+            Label(Format.money r.Amount).font(size = 40.).centerTextHorizontal()
+            VStack(spacing = 6.) {
+                Label("Receipt").font(size = 16.)
+                line "Call-out fee" (Format.money r.CallOutFee)
+                line (sprintf "Labour (%s)" (Format.duration r.LabourMinutes)) (Format.money r.LabourAmount)
+                line "Subtotal" (Format.money r.Subtotal)
+                line "HST (13%)" (Format.money r.Tax)
+                line "Total" (Format.money r.Amount)
+                line "Paid with" r.Method
+                Label(sprintf "Job #%d · %s" r.JobId r.Status).font(size = 11.)
+            }
             Button("Rate your experience", Navigate (Rating jobId))
     }).centerVertical().padding(24.)

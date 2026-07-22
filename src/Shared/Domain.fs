@@ -60,5 +60,32 @@ module ServiceRate =
         let r = forService name
         total r r.TypicalMinutes
 
+/// Marketplace economics. These are the numbers an investor is actually buying,
+/// so they belong in one place rather than being implied by a single total.
+module Money =
+    /// Ontario HST.
+    let taxRate = 0.13m
+    /// The platform's cut of the subtotal. 15% is mid-market for a services
+    /// marketplace — high enough to be a business, low enough to be defensible.
+    let platformFeeRate = 0.15m
+
+    let private r2 (d: decimal) = System.Math.Round(d, 2)
+
+    /// Splits a job's charge into the lines a receipt has to show. `total` is
+    /// the price already agreed on the job, so the breakdown always reconciles
+    /// to what the customer was quoted rather than being recomputed and drifting.
+    let breakdown (callOut: decimal) (labourMinutes: int) (labour: decimal) =
+        let subtotal = r2 (callOut + labour)
+        let tax = r2 (subtotal * taxRate)
+        let platformFee = r2 (subtotal * platformFeeRate)
+        {| CallOutFee = callOut
+           LabourMinutes = labourMinutes
+           LabourAmount = r2 labour
+           Subtotal = subtotal
+           Tax = tax
+           Total = r2 (subtotal + tax)
+           PlatformFee = platformFee
+           ProviderPayout = r2 (subtotal - platformFee) |}
+
 module ServiceNames =
     let all = ["Plumbing"; "Electrical"; "Painting"; "Mechanic"; "Moving"; "Cleaning"; "HVAC"]

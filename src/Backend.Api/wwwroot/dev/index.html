@@ -782,7 +782,9 @@ async function simulatePayment() {
   const jobId = parseInt($("payJobId").value, 10);
   if (!jobId) { log("Enter a job id first", "error"); return; }
   const r = await api("POST", "/payment/simulate", { jobId });
-  if (r) log(`Payment $${r.amount} — ${r.status}`, "note");
+  // The console is a first-class DTO consumer: when the receipt grew line items
+  // this had to grow with it, or the operator sees less than either app does.
+  if (r) log(`Payment $${r.amount} (sub $${r.subtotal} + HST $${r.tax}) · fee $${r.platformFee} · payout $${r.providerPayout} · ${r.method} — ${r.status}`, "note");
 }
 
 /* Mirrors FixItHere.Provider.Domain Slider.position: linear interpolation from

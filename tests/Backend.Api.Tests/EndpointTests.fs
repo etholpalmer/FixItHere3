@@ -13,7 +13,7 @@ let ``login returns fake token for named customer`` () =
     use c = client ()
     let resp =
         c.PostAsJsonAsync("/login",
-            { Role = "Customer"; Email = "john@gmail.com"; Password = "Customer1!" }).Result
+            { Role = "Customer"; Email = "john.reyes@gmail.com"; Password = "Customer1!" }).Result
     let env = resp.Content.ReadFromJsonAsync<Envelope<LoginResponse>>().Result
     Assert.True(env.Success)
     Assert.Equal("Customer", env.Data.Role)
@@ -141,7 +141,7 @@ let ``login rejects a wrong password`` () =
     use c = client ()
     let resp =
         c.PostAsJsonAsync("/login",
-            { Role = "Customer"; Email = "john@gmail.com"; Password = "wrong" }).Result
+            { Role = "Customer"; Email = "john.reyes@gmail.com"; Password = "wrong" }).Result
     Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode)
 
 [<Fact>]
@@ -157,11 +157,11 @@ let ``login is case-insensitive on email but not on password`` () =
     use c = client ()
     let upper =
         c.PostAsJsonAsync("/login",
-            { Role = "Customer"; Email = "John@Gmail.com"; Password = "Customer1!" }).Result
+            { Role = "Customer"; Email = "John.Reyes@Gmail.com"; Password = "Customer1!" }).Result
     Assert.Equal(HttpStatusCode.OK, upper.StatusCode)
     let lowerPwd =
         c.PostAsJsonAsync("/login",
-            { Role = "Customer"; Email = "john@gmail.com"; Password = "customer1!" }).Result
+            { Role = "Customer"; Email = "john.reyes@gmail.com"; Password = "customer1!" }).Result
     Assert.Equal(HttpStatusCode.Unauthorized, lowerPwd.StatusCode)
 
 [<Fact>]
@@ -169,7 +169,7 @@ let ``a customer cannot sign in with the provider password`` () =
     use c = client ()
     let resp =
         c.PostAsJsonAsync("/login",
-            { Role = "Customer"; Email = "john@gmail.com"; Password = "Provider1!" }).Result
+            { Role = "Customer"; Email = "john.reyes@gmail.com"; Password = "Provider1!" }).Result
     Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode)
 
 [<Fact>]
