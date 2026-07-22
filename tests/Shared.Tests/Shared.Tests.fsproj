@@ -10,6 +10,7 @@
     <Compile Include="StateMachineTests.fs" />
     <Compile Include="DtoTests.fs" />
     <Compile Include="FormatTests.fs" />
+    <Compile Include="ContractTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

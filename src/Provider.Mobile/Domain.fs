@@ -1,6 +1,7 @@
 namespace FixItHere.Provider
 
 open System.Threading.Tasks
+open FixItHere.Shared
 open FixItHere.Shared.Dtos
 
 /// Customer and Provider ids are independent sequences that both start at 1,
@@ -17,7 +18,13 @@ module Drafts =
 [<AutoOpen>]
 module Actor =
     /// True when (id, role) identifies the same actor as the session.
-    let isSelf (s: Session) (id: int) (role: string) = id = s.UserId && role = s.Role
+    /// Delegates to `Actor.isWire` rather than comparing by hand. Both apps
+    /// carried their own copy of this expression, and the bare-id version of it
+    /// has been fixed in four separate places in this codebase.
+    let isSelf (s: Session) (id: int) (role: string) =
+        match Actor.ofWire s.UserId s.Role with
+        | Some me -> Actor.isWire me id role
+        | None -> false
 
 type Screen =
     | Splash | Login | Home

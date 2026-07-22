@@ -23,6 +23,15 @@ type Provider =
 type Job =
     { Id: int; CustomerId: int; ProviderId: int; ServiceId: int
       State: string; Price: decimal; ScheduledFor: string
+      /// The reschedule sub-status, stored as columns rather than folded into
+      /// `State`. See `FixItHere.Shared.Reschedule` for why a JobState case
+      /// cannot carry a time.
+      PromisedStart: string
+      ProposedStart: string; ProposedBy: string
+      ProposalReason: string; ProposalExpiresAt: string
+      /// Seeded jobs are false: they exist to populate lists, and letting the
+      /// demo clock march over their grace windows fires a no-show storm.
+      IsDemoTracked: bool
       Lat: float; Lng: float; Address: string }
 
 [<CLIMutable>]
@@ -45,6 +54,7 @@ module JobStateCodec =
         | "Scheduled" -> Scheduled | "EnRoute" -> EnRoute | "Arrived" -> Arrived
         | "InProgress" -> InProgress | "Completed" -> Completed
         | "Closed" -> Closed | "Cancelled" -> Cancelled
+        | "ProviderNoShow" -> ProviderNoShow
         | other -> failwithf "Unknown job state '%s'" other
 
 type AppDb(options: DbContextOptions<AppDb>) =

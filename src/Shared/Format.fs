@@ -53,3 +53,14 @@ let duration (minutes: int) =
     if minutes < 60 then sprintf "%dm" minutes
     elif minutes % 60 = 0 then sprintf "%dh" (minutes / 60)
     else sprintf "%dh %dm" (minutes / 60) (minutes % 60)
+
+/// "8:32" · "in 2h 14m" · "3:12 late". The only countdown renderer in the
+/// product: two independent `statusLine` implementations already drifted in
+/// this codebase, and a countdown that reads differently on the two phones
+/// standing side by side is the exact tell this phase exists to remove.
+let countdown (remaining: TimeSpan) =
+    let abs = remaining.Duration()
+    let body =
+        if abs.TotalHours >= 1.0 then sprintf "%dh %02dm" (int abs.TotalHours) abs.Minutes
+        else sprintf "%d:%02d" (int abs.TotalMinutes) abs.Seconds
+    if remaining.Ticks < 0L then sprintf "%s late" body else body

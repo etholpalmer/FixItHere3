@@ -68,7 +68,10 @@ let mkSession () : Session = { Token = "t"; UserId = 1; Role = "Customer"; Displ
 let mkJob id state : JobDto =
     { Id = id; CustomerId = 1; CustomerName = "John"; ProviderId = 1; ProviderName = "Mike's Plumbing"
       ServiceId = 3; ServiceName = "Plumbing"; State = state; Price = 85m
-      ScheduledFor = "Now"; Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
+      ScheduledFor = "Now"; PromisedStart = "Now"
+      ProposedStart = ""; ProposedBy = ""
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true
+      Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
 let up msg model = Update.update stubDeps msg model |> fst
 

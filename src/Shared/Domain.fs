@@ -8,6 +8,12 @@ type JobState =
     | Completed
     | Closed
     | Cancelled
+    /// The provider never turned up. Nullary and terminal, so it round-trips
+    /// through `JobStateCodec` safely — unlike a reschedule state, which would
+    /// need to carry a time. Distinct from `Cancelled` because "nobody came"
+    /// and "someone called it off" are different stories, and the demo's
+    /// escalation beat is only legible if the outcome says which happened.
+    | ProviderNoShow
 
 type JobEvent =
     | Accepted      // provider takes the job (stays Scheduled in demo; accept marks assignment)
@@ -17,6 +23,10 @@ type JobEvent =
     | CompleteWork
     | RateAndClose
     | Cancel
+    /// Only reachable once the grace window past the promised arrival has
+    /// elapsed — `Reschedule.canReportNoShow` is the gate, enforced by the
+    /// caller because the state machine has no clock.
+    | MarkNoShow
 
 type JobKind = Service
 

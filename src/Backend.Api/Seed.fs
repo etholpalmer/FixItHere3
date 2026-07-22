@@ -5,7 +5,10 @@ open FixItHere.Shared
 open FixItHere.Backend.Db
 
 /// Fixed timestamp for SEEDED rows, so the seed stays byte-identical across runs.
-let Epoch = "2026-01-01T00:00:00Z"
+/// Re-exported from `DemoClock` rather than restated. The demo clock starts at
+/// this instant so every seeded job sits legitimately in the future; two
+/// literals that must agree are two literals that will eventually not.
+let Epoch = DemoClock.epochIso
 
 /// Wall-clock timestamp for rows created at RUNTIME. Seeded and live rows shared
 /// Epoch, which made live chat messages indistinguishable from seeded ones and
@@ -92,6 +95,12 @@ let run (db: AppDb) =
               let jitter = rate.TypicalMinutes * (80 + rng.Next(0, 9) * 5) / 100
               ServiceRate.total rate jitter
           ScheduledFor = DateTimeOffset.Parse(Epoch).AddHours(float i).ToString("o")
+          PromisedStart = DateTimeOffset.Parse(Epoch).AddHours(float i).ToString("o")
+          ProposedStart = ""; ProposedBy = ""
+          ProposalReason = ""; ProposalExpiresAt = ""
+          // Seeded jobs populate lists; they are not what the demo drives. True
+          // here would march thirty grace windows past on any accelerated run.
+          IsDemoTracked = false
           Lat = c.Lat; Lng = c.Lng
           Address = c.Address }
     // 50 finished (alternate Completed/Closed), 30 pending

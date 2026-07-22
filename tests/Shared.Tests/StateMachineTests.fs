@@ -35,6 +35,6 @@ let ``cancel allowed from any pre-completed state`` (name: string) =
 
 [<Property>]
 let ``terminal states accept no events`` (ev: JobEvent) =
-    [Closed; Cancelled]
+    [Closed; Cancelled; ProviderNoShow]
     |> List.forall (fun st ->
         match transition st ev with Error _ -> true | Ok _ -> false)

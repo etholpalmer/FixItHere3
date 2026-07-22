@@ -17,6 +17,16 @@ type IBroadcaster =
     abstract NotifyJob: text: string * customerId: int * providerId: int -> Task
     abstract LocationUpdated: LocationDto -> Task
     abstract ProviderUpdated: ProviderDto -> Task
+    /// The demo clock changed shape (paused, resumed, re-rated, jumped).
+    /// Broadcast to everyone on purpose: it is not job-scoped, every client
+    /// needs it, and it carries no one's data.
+    abstract ClockUpdated: DemoClockDto -> Task
+    /// A reschedule negotiation moved. The job DTO carries the whole new
+    /// sub-status, so the client re-renders rather than patching; `outcome` is
+    /// the copy key ("ProposalRaised" | "PromiseMoved" | "PromiseStands" |
+    /// "ProposalLapsed"), which is what makes decline and lapse readable as
+    /// different events despite leaving identical state behind.
+    abstract RescheduleChanged: JobDto * outcome: string -> Task
 
 type NullBroadcaster() =
     interface IBroadcaster with
@@ -25,6 +35,8 @@ type NullBroadcaster() =
         member _.NotifyJob (_, _, _) = Task.CompletedTask
         member _.LocationUpdated _ = Task.CompletedTask
         member _.ProviderUpdated _ = Task.CompletedTask
+        member _.ClockUpdated _ = Task.CompletedTask
+        member _.RescheduleChanged (_, _) = Task.CompletedTask
 
 let toJobDto (db: AppDb) (j: Job) : JobDto =
     let cust = db.Customers.Single(fun c -> c.Id = j.CustomerId)
@@ -34,6 +46,13 @@ let toJobDto (db: AppDb) (j: Job) : JobDto =
       ProviderId = j.ProviderId; ProviderName = prov.BusinessName
       ServiceId = j.ServiceId; ServiceName = svc.Name
       State = j.State; Price = j.Price; ScheduledFor = j.ScheduledFor
+      // The promise falls back to the booking when no reschedule has moved it.
+      // Never empty: every countdown targets this field, and an empty target
+      // renders as a blank where a time should be.
+      PromisedStart = (if System.String.IsNullOrEmpty j.PromisedStart then j.ScheduledFor else j.PromisedStart)
+      ProposedStart = j.ProposedStart; ProposedBy = j.ProposedBy
+      ProposalReason = j.ProposalReason; ProposalExpiresAt = j.ProposalExpiresAt
+      IsDemoTracked = j.IsDemoTracked
       Lat = j.Lat; Lng = j.Lng; Address = j.Address }
 
 type JobService(db: AppDb, hub: IBroadcaster) =
@@ -73,6 +92,11 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                   // call and a house clean costing the same is a tell.
                   Price = ServiceRate.quote svcName
                   ScheduledFor = req.ScheduleChoice
+                  PromisedStart = req.ScheduleChoice
+                  ProposedStart = ""; ProposedBy = ""
+                  ProposalReason = ""; ProposalExpiresAt = ""
+                  // Booked in-session, so this one *is* the demo.
+                  IsDemoTracked = true
                   Lat = resolvedLat; Lng = resolvedLng; Address = resolvedAddress }
             ignore prov
             db.Jobs.Add job |> ignore

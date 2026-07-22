@@ -21,7 +21,10 @@ let receipt (jobId: int) (subtotal: decimal) : PaymentResult =
 let mkJob id state : JobDto =
     { Id = id; CustomerId = 1; CustomerName = "John"; ProviderId = 4; ProviderName = "Elite HVAC"
       ServiceId = 7; ServiceName = "HVAC"; State = state; Price = 85m
-      ScheduledFor = "Now"; Lat = 43.70; Lng = -79.40; Address = "1 Demo St" }
+      ScheduledFor = "Now"; PromisedStart = "Now"
+      ProposedStart = ""; ProposedBy = ""
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true
+      Lat = 43.70; Lng = -79.40; Address = "1 Demo St" }
 
 [<Fact>]
 let ``nav push and back mirror customer app`` () =

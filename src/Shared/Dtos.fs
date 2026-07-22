@@ -41,6 +41,29 @@ type JobDto =
       ProviderId: int; ProviderName: string
       ServiceId: int; ServiceName: string
       State: string; Price: decimal; ScheduledFor: string
+      /// The arrival time that currently stands, ISO-8601. Equal to
+      /// `ScheduledFor` until a reschedule is accepted, after which the two
+      /// diverge and both matter: the original booking is what the customer
+      /// agreed to, the promise is what the countdown targets.
+      PromisedStart: string
+      // The pending proposal, flattened rather than nested.
+      //
+      // A nested `ProposalDto option` cannot cross System.Text.Json, and a
+      // nested nullable record would force `Unchecked.defaultof<_>` at every
+      // construction site — a NullReferenceException waiting for whichever
+      // screen reads it first. Empty strings are the absent case, and every
+      // `Format` function already treats an empty timestamp as "".
+      ProposedStart: string
+      /// "" | "Customer" | "Provider"
+      ProposedBy: string
+      ProposalReason: string
+      ProposalExpiresAt: string
+      /// False for seeded jobs, true for anything booked in-session.
+      ///
+      /// Without this the demo clock creates a storm: thirty seeded jobs have
+      /// fixed start times, so any accelerated run marches demo-now past all
+      /// thirty grace windows and fires thirty no-show notifications in a row.
+      IsDemoTracked: bool
       Lat: float; Lng: float; Address: string }
 
 [<CLIMutable>]
@@ -111,3 +134,45 @@ type PaymentResult =
       ProviderPayout: decimal
       Method: string
       Status: string }
+
+/// The demo clock, as the map rather than as a time.
+///
+/// Clients apply this to their own wall clock, so a client that has been
+/// disconnected for a minute resyncs by fetching this once — not by
+/// accumulating ticks it missed. `DemoNow` is included for the console's
+/// readout and for tests; it is redundant with the map by construction.
+[<CLIMutable>]
+type DemoClockDto =
+    { DemoNow: string
+      AnchorDemo: string
+      AnchorReal: string
+      Rate: float
+      Running: bool }
+
+[<CLIMutable>]
+type SetClockRequest =
+    { /// "pause" | "resume" | "rate" | "jump"
+      Action: string
+      Rate: float
+      /// ISO-8601 demo instant for "jump"; ignored otherwise.
+      Target: string }
+
+/// Proposing party is taken from the request, not inferred from the job: either
+/// side may propose, and `Reschedule.apply` refuses to let the proposer answer
+/// its own proposal.
+[<CLIMutable>]
+type ProposeRescheduleRequest =
+    { JobId: int
+      ByRole: string
+      ProposedStart: string
+      Reason: string }
+
+[<CLIMutable>]
+type RescheduleDecisionRequest =
+    { JobId: int
+      /// The *answering* party, so the server can reject self-answering.
+      ByRole: string
+      Accept: bool }
+
+[<CLIMutable>]
+type ReportNoShowRequest = { JobId: int; ByRole: string }
