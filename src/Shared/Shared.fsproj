@@ -10,6 +10,7 @@
     <Compile Include="Places.fs" />
     <Compile Include="Actor.fs" />
     <Compile Include="Domain.fs" />
+    <Compile Include="JobStatus.fs" />
     <Compile Include="DemoTime.fs" />
     <Compile Include="Reschedule.fs" />
     <Compile Include="BookingSlot.fs" />

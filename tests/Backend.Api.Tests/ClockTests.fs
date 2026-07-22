@@ -158,3 +158,80 @@ let ``arriving settles a pending proposal`` () =
 
     (svc.Apply job.Id Arrive).Result |> ignore
     Assert.Equal("", db.Jobs.Single(fun j -> j.Id = job.Id).ProposedStart)
+
+// -------------------------------------------------- Escalation endpoints ----
+
+let private soonestScheduled (c: Net.Http.HttpClient) =
+    c.GetFromJsonAsync<Envelope<JobDto[]>>("/jobs?customerId=1").Result.Data
+    |> Array.filter (fun j -> j.State = "Scheduled")
+    |> Array.minBy (fun j -> j.PromisedStart)
+
+let private propose (c: Net.Http.HttpClient) jobId role (at: DateTimeOffset) =
+    c.PostAsJsonAsync("/jobs/reschedule",
+        { JobId = jobId; ByRole = role; ProposedStart = at.ToString "o"; Reason = "Traffic on the DVP" }).Result
+
+let private decide (c: Net.Http.HttpClient) jobId role accept =
+    c.PostAsJsonAsync("/jobs/reschedule/decision",
+        { JobId = jobId; ByRole = role; Accept = accept }).Result
+
+[<Fact>]
+let ``a no-show cannot be reported before the grace window, and the error says when`` () =
+    // The gate is the clock, not the visibility of a button. A UI that shows
+    // the control early must still be refused.
+    use c = client ()
+    let job = soonestScheduled c
+    let resp = c.PostAsJsonAsync("/jobs/no-show", { JobId = job.Id; ByRole = "Customer" }).Result
+    Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode)
+    Assert.Contains("Too early", resp.Content.ReadAsStringAsync().Result)
+
+[<Fact>]
+let ``declining leaves the promise standing and clears the proposal`` () =
+    use c = client ()
+    let job = soonestScheduled c
+    let original = DateTimeOffset.Parse job.PromisedStart
+    Assert.Equal(HttpStatusCode.OK, (propose c job.Id "Provider" (original.AddMinutes 15.0)).StatusCode)
+
+    // The proposer answering itself would make this unilateral.
+    Assert.Equal(HttpStatusCode.Conflict, (decide c job.Id "Provider" true).StatusCode)
+
+    let declined = (decide c job.Id "Customer" false).Content.ReadFromJsonAsync<Envelope<JobDto>>().Result.Data
+    Assert.Equal(original, DateTimeOffset.Parse declined.PromisedStart)
+    Assert.Equal("", declined.ProposedStart)
+
+[<Fact>]
+let ``accepting moves the promise and pushes the no-show deadline with it`` () =
+    use c = client ()
+    let job = soonestScheduled c
+    let original = DateTimeOffset.Parse job.PromisedStart
+    propose c job.Id "Provider" (original.AddMinutes 15.0) |> ignore
+    let agreed = (decide c job.Id "Customer" true).Content.ReadFromJsonAsync<Envelope<JobDto>>().Result.Data
+    Assert.Equal(original.AddMinutes 15.0, DateTimeOffset.Parse agreed.PromisedStart)
+    Assert.Equal("", agreed.ProposedStart)
+
+    // Past the *original* deadline but not the new one: still too early.
+    post c "jump" 0.0 ((original.AddMinutes Reschedule.graceMinutes).AddSeconds 1.0 |> fun d -> d.ToString "o") |> ignore
+    Assert.Equal(HttpStatusCode.Conflict,
+                 c.PostAsJsonAsync("/jobs/no-show", { JobId = job.Id; ByRole = "Customer" }).Result.StatusCode)
+
+[<Fact>]
+let ``past the grace window the job becomes a no-show, once`` () =
+    use c = client ()
+    let job = soonestScheduled c
+    let deadline = DateTimeOffset.Parse(job.PromisedStart).AddMinutes(Reschedule.graceMinutes + 1.0)
+    post c "jump" 0.0 (deadline.ToString "o") |> ignore
+
+    let resp = c.PostAsJsonAsync("/jobs/no-show", { JobId = job.Id; ByRole = "Customer" }).Result
+    Assert.Equal(HttpStatusCode.OK, resp.StatusCode)
+    Assert.Equal("ProviderNoShow", resp.Content.ReadFromJsonAsync<Envelope<JobDto>>().Result.Data.State)
+
+    // Terminal. A second report is the state machine's job to refuse.
+    Assert.Equal(HttpStatusCode.Conflict,
+                 c.PostAsJsonAsync("/jobs/no-show", { JobId = job.Id; ByRole = "Customer" }).Result.StatusCode)
+
+[<Fact>]
+let ``an unknown role is rejected rather than guessed`` () =
+    use c = client ()
+    let job = soonestScheduled c
+    Assert.Equal(HttpStatusCode.BadRequest,
+                 (propose c job.Id "Admin" (DateTimeOffset.Parse(job.PromisedStart).AddMinutes 15.0)).StatusCode)
+    Assert.Equal(HttpStatusCode.BadRequest, (decide c job.Id "" true).StatusCode)

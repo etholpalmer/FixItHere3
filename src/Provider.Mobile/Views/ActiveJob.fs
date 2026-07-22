@@ -5,24 +5,28 @@ open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.ClientShared
 open FixItHere.Provider
+open FixItHere.Shared
 
 let private statusLine (state: string) =
-    match state with
-    | "Scheduled" -> "Ready to head out"
-    | "EnRoute" -> "You're on the way"
-    | "Arrived" -> "You have arrived"
-    | "InProgress" -> "Work in progress"
-    | "Completed" -> "Job complete!"
-    | s -> s
+    match JobStateCodec.tryParse state with
+    | Some s -> JobStatus.forProvider s
+    | None -> "Checking status…"
 
-/// The single state-driven next action for this job (spec: one button, driven by job state).
+/// The single state-driven next action for this job (spec: one button, driven
+/// by job state). Shared decides *which* transition; this only maps it to the
+/// app's own Msg, so the button label and the event it fires cannot disagree.
 let private actionButton (j: FixItHere.Shared.Dtos.JobDto) =
-    match j.State with
-    | "Scheduled" -> Some ("Depart", Depart j.Id)
-    | "EnRoute" -> Some ("Arrived", MarkArrived j.Id)
-    | "Arrived" -> Some ("Start Work", BeginWork j.Id)
-    | "InProgress" -> Some ("Complete", FinishWork j.Id)
-    | _ -> None
+    JobStateCodec.tryParse j.State
+    |> Option.bind JobStatus.nextProviderAction
+    |> Option.map (fun (label, ev) ->
+        let msg =
+            match ev with
+            | DepartEnRoute -> Depart j.Id
+            | Arrive -> MarkArrived j.Id
+            | StartWork -> BeginWork j.Id
+            | CompleteWork -> FinishWork j.Id
+            | Accepted | RateAndClose | Cancel | MarkNoShow -> Depart j.Id
+        label, msg)
 
 let view (model: Model) (jobId: int) =
     match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with

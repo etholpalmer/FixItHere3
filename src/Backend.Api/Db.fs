@@ -47,15 +47,12 @@ type Rating =
       Stars: int; Comment: string
       CreatedAt: string }
 
+/// Kept as a shim so the backend's call sites stay put. The implementation
+/// moved to Shared when the apps needed the same decode — see
+/// FixItHere.Shared.JobStateCodec.
 module JobStateCodec =
-    let ofState (s: JobState) = sprintf "%A" s
-    let toState (s: string) : JobState =
-        match s with
-        | "Scheduled" -> Scheduled | "EnRoute" -> EnRoute | "Arrived" -> Arrived
-        | "InProgress" -> InProgress | "Completed" -> Completed
-        | "Closed" -> Closed | "Cancelled" -> Cancelled
-        | "ProviderNoShow" -> ProviderNoShow
-        | other -> failwithf "Unknown job state '%s'" other
+    let ofState = FixItHere.Shared.JobStateCodec.ofState
+    let toState = FixItHere.Shared.JobStateCodec.parse
 
 type AppDb(options: DbContextOptions<AppDb>) =
     inherit DbContext(options)

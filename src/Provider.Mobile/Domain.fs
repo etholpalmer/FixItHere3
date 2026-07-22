@@ -182,10 +182,18 @@ module Nav =
 
 [<AutoOpen>]
 module Domain =
-    let private inFlight = [ "EnRoute"; "Arrived"; "InProgress" ]
     /// The single job currently being worked (spec: one Active Job at a time).
+    ///
+    /// The in-flight set lives in Shared and is exhaustive over JobState, so a
+    /// new state cannot silently fall outside it. The old string list would
+    /// have quietly dropped any new in-flight state out of `activeJob` — and
+    /// pinned any new *terminal* one there forever.
     let activeJob (m: Model) : JobDto option =
-        m.Jobs |> List.tryFind (fun j -> List.contains j.State inFlight)
+        m.Jobs
+        |> List.tryFind (fun j ->
+            JobStateCodec.tryParse j.State
+            |> Option.map JobStatus.isInFlight
+            |> Option.defaultValue false)
 
     /// True when an incoming hub chat message should trigger a canned auto-reply:
     /// auto-reply is enabled, the message isn't my own, and the sender is the

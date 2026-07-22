@@ -7,14 +7,13 @@ open FixItHere.ClientShared
 open FixItHere.Customer
 open FixItHere.Shared
 
+/// Copy comes from Shared, which matches on the JobState union rather than on
+/// strings. The old version ended `| s -> s`, so a state without copy rendered
+/// its own enum name — the user would have read "ProviderNoShow".
 let private statusLine (state: string) =
-    match state with
-    | "Scheduled" -> "Waiting for provider to head out…"
-    | "EnRoute" -> "Your provider is on the way"
-    | "Arrived" -> "Your provider has arrived"
-    | "InProgress" -> "Work in progress"
-    | "Completed" -> "Job complete!"
-    | s -> s
+    match JobStateCodec.tryParse state with
+    | Some s -> JobStatus.forCustomer s
+    | None -> "Checking status…"
 
 let view (model: Model) (jobId: int) =
     match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with

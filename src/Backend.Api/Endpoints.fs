@@ -4,6 +4,7 @@ open System
 open System.Linq
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
+open Microsoft.Extensions.DependencyInjection
 open FixItHere.Shared
 open FixItHere.Shared.Dtos
 open FixItHere.Backend.Db
@@ -153,6 +154,69 @@ let mapAll (app: WebApplication) =
                 | Some startsAt ->
                     let! dto = svc.Create req startsAt
                     return okJson dto })) |> ignore
+
+    // ---- Reschedule and no-show ------------------------------------------
+    // Bilateral by construction: the caller states which party it is, and
+    // `Reschedule.apply` refuses to let the proposing party answer itself.
+
+    app.MapPost("/jobs/reschedule",
+        Func<ProposeRescheduleRequest, JobService, Clock.DemoClockService, System.Threading.Tasks.Task<IResult>>(
+            fun req svc clock -> task {
+                match ActorRole.ofWire req.ByRole with
+                | None -> return err 400 (sprintf "Unknown role '%s'." req.ByRole)
+                | Some by ->
+                    match DateTimeOffset.TryParse(req.ProposedStart, Globalization.CultureInfo.InvariantCulture,
+                                                  Globalization.DateTimeStyles.RoundtripKind) with
+                    | false, _ -> return err 400 (sprintf "Cannot parse '%s' as a time." req.ProposedStart)
+                    | true, proposedStart ->
+                        let now = clock.Now()
+                        let proposal =
+                            { ProposedStart = proposedStart
+                              By = by
+                              Reason = (if String.IsNullOrWhiteSpace req.Reason then "No reason given" else req.Reason)
+                              // Expiry is set here, not by the caller: a client
+                              // choosing its own window could keep a proposal
+                              // alive indefinitely and strand the other party.
+                              ExpiresAt = now + Reschedule.proposalWindow }
+                        match! svc.Reschedule req.JobId now (Propose proposal) with
+                        | Ok (dto, _) -> return okJson dto
+                        | Error e -> return err 409 e })) |> ignore
+
+    app.MapPost("/jobs/reschedule/decision",
+        Func<RescheduleDecisionRequest, JobService, Clock.DemoClockService, System.Threading.Tasks.Task<IResult>>(
+            fun req svc clock -> task {
+                match ActorRole.ofWire req.ByRole with
+                | None -> return err 400 (sprintf "Unknown role '%s'." req.ByRole)
+                | Some by ->
+                    let ev = if req.Accept then AcceptProposal by else DeclineProposal by
+                    match! svc.Reschedule req.JobId (clock.Now()) ev with
+                    | Ok (dto, _) -> return okJson dto
+                    | Error e -> return err 409 e })) |> ignore
+
+    app.MapPost("/jobs/no-show",
+        // IBroadcaster is scoped, so it must arrive as a handler parameter.
+        // Reaching for app.Services.GetRequiredService here resolved from the
+        // *root* provider and threw at request time — a 500 that still applied
+        // the state change, so the job looked correctly transitioned to anyone
+        // checking afterwards.
+        Func<ReportNoShowRequest, JobService, AppDb, Clock.DemoClockService, IBroadcaster, System.Threading.Tasks.Task<IResult>>(
+            fun req svc db clock hub -> task {
+                match db.Jobs.SingleOrDefault(fun j -> j.Id = req.JobId) |> Option.ofObj with
+                | None -> return err 404 (sprintf "Job %d not found" req.JobId)
+                | Some job ->
+                    // Gated on the clock, not on a button being visible. The
+                    // grace window is the rule; the UI merely reflects it.
+                    let sched = readReschedule job
+                    if not (Reschedule.canReportNoShow (clock.Now()) sched) then
+                        return err 409
+                            (sprintf "Too early: a no-show can only be reported after %s."
+                                ((Reschedule.noShowDeadline sched).ToString "o"))
+                    else
+                        match! svc.Apply req.JobId MarkNoShow with
+                        | Ok dto ->
+                            do! hub.NotifyJob ("Reported as a no-show", dto.CustomerId, dto.ProviderId)
+                            return okJson dto
+                        | Error e -> return err 409 e })) |> ignore
 
     app.MapGet("/jobs", Func<AppDb, Nullable<int>, Nullable<int>, IResult>(
         fun db customerId providerId ->

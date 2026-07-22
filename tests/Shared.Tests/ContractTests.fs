@@ -285,3 +285,51 @@ let ``the two haversine implementations are now one`` () =
     let d = Geo.distanceKm a b
     Assert.InRange(d, 17.0, 20.0)
     Assert.Equal(0.0, Geo.distanceKm a a)
+
+// ------------------------------------------------------------- JobStatus ----
+
+let private allStates =
+    [ Scheduled; EnRoute; Arrived; InProgress; Completed; Closed; Cancelled; ProviderNoShow ]
+
+[<Fact>]
+let ``every state has real copy on both sides, and never its own enum name`` () =
+    // The tell this replaces: both apps matched on strings ending `| s -> s`,
+    // so a state without copy rendered as "ProviderNoShow" to a user. Matching
+    // on the union makes a missing case a compile error; this catches the
+    // subtler failure of "copy" that is just the case name.
+    for st in allStates do
+        let raw = JobStateCodec.ofState st
+        for copy in [ JobStatus.forCustomer st; JobStatus.forProvider st ] do
+            Assert.False(String.IsNullOrWhiteSpace copy, raw)
+            Assert.NotEqual<string>(raw, copy)
+
+[<Fact>]
+let ``state strings round trip, and an unknown one degrades rather than crashes`` () =
+    for st in allStates do
+        Assert.Equal(Some st, JobStateCodec.tryParse (JobStateCodec.ofState st))
+    Assert.True((JobStateCodec.tryParse "Teleported").IsNone)
+    Assert.Throws<Exception>(fun () -> JobStateCodec.parse "Teleported" |> ignore) |> ignore
+
+[<Fact>]
+let ``terminal states offer no next action and are never in flight`` () =
+    // ProviderNoShow in the in-flight set would pin a dead job as the
+    // provider's one active job forever.
+    for st in [ Completed; Closed; Cancelled; ProviderNoShow ] do
+        Assert.True((JobStatus.nextProviderAction st).IsNone, JobStateCodec.ofState st)
+        Assert.False(JobStatus.isInFlight st, JobStateCodec.ofState st)
+
+[<Fact>]
+let ``the next action's event is one the state machine will actually accept`` () =
+    // A button whose label promises a transition the machine rejects is worse
+    // than no button.
+    for st in allStates do
+        match JobStatus.nextProviderAction st with
+        | Some (_, ev) -> Assert.True(StateMachine.transition st ev |> Result.isOk, JobStateCodec.ofState st)
+        | None -> ()
+
+[<Fact>]
+let ``only a pending arrival counts down`` () =
+    Assert.True(JobStatus.awaitsArrival Scheduled)
+    Assert.True(JobStatus.awaitsArrival EnRoute)
+    for st in [ Arrived; InProgress; Completed; Closed; Cancelled; ProviderNoShow ] do
+        Assert.False(JobStatus.awaitsArrival st, JobStateCodec.ofState st)
