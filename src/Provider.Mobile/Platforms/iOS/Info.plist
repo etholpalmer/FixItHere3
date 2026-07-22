@@ -28,5 +28,19 @@
 	</array>
 	<key>XSAppIconAssets</key>
 	<string>Assets.xcassets/appicon.appiconset</string>
+	<!-- Pinned to Light.
+
+	     Theme.fs uses concrete colours because MAUI does not surface iOS
+	     semantic colours (label, systemBackground) through Fabulous, so a
+	     device in Dark Mode would render dark chrome around a light-only app —
+	     white bubbles on a black status bar, unreadable placeholder text. A
+	     demo has no opportunity to recover from that.
+
+	     This is a stopgap with a known cost: it also disables Dark Mode for
+	     anyone who prefers it. Removing it is gated on a real dark palette,
+	     which is tracked as Phase 4 work, not on someone noticing this later.
+	  -->
+	<key>UIUserInterfaceStyle</key>
+	<string>Light</string>
 </dict>
 </plist>
