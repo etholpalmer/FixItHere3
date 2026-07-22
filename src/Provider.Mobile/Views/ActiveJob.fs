@@ -66,8 +66,15 @@ let view (model: Model) (jobId: int) =
     match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
     | None -> AnyView((VStack(spacing = 12.) { Button("← Back", GoBack); Label("Job not found") }).padding(24.))
     | Some job ->
+        let sched : Reschedule = rescheduleOf job
+        let awaitingArrival =
+            JobStateCodec.tryParse job.State
+            |> Option.map JobStatus.awaitsArrival
+            |> Option.defaultValue false
+        let proposalPending = sched.Pending.IsSome
+        let lateControlsVisible = awaitingArrival && not proposalPending
         AnyView(
-            (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto ]) {
+            (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto ]) {
                 (VStack(spacing = 4.) {
                     Button("← Back", GoBack)
                     Label(statusLine job.State).font(size = 20.)
@@ -84,12 +91,32 @@ let view (model: Model) (jobId: int) =
                     Label(Format.money job.Price)
                 }).gridRow(0)
                 WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(1)
+                // Offered only while an arrival is still ahead of us, and only
+                // when nothing is already pending — the server refuses a second
+                // proposal, so a button that could raise one would be a lie.
+                //
+                // One flat HStack: Fabulous CE rejects nested layouts here.
+                (HStack(spacing = 8.) {
+                    if lateControlsVisible then
+                        Label("Running late?")
+                            .font(size = 13.)
+                            .textColor(Theme.inkMuted)
+                            .centerVertical()
+                        for mins in [ 10; 15; 30 ] do
+                            Button(sprintf "+%d" mins, ProposeDelay (job.Id, mins))
+                    elif proposalPending then
+                        Label("Waiting for the customer to answer")
+                            .font(size = 13.)
+                            .textColor(Theme.warning)
+                })
+                    .gridRow(2)
+
                 (HStack(spacing = 8.) {
                     match actionButton job with
                     | Some (label, msg) -> Button(label, msg).background(Microsoft.Maui.Graphics.Colors.SeaGreen)
                     | None -> ()
                     Button("Chat", Navigate (Chat job.Id))
                     Button("Call", StartFakeCall)
-                }).gridRow(2)
+                }).gridRow(3)
             }).padding(12.)
         )

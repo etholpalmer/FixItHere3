@@ -34,5 +34,7 @@ let createDepsWith
       GetGpsLocation = gpsLocation
       GetClock = fun () -> Http.getEnv http "/demo/clock"
       GetLocation = fun providerId -> Http.getEnv http (sprintf "/location?providerId=%d" providerId)
+      DecideReschedule = fun req -> Http.postEnv http "/jobs/reschedule/decision" req
+      ReportNoShow = fun req -> Http.postEnv http "/jobs/no-show" req
       SendTyping = sendTyping
       SendSeen = sendSeen }

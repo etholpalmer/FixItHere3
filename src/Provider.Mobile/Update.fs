@@ -101,6 +101,21 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | MarkArrived id -> model, apiCmd (fun () -> deps.Arrive id) JobActioned
     | BeginWork id -> model, apiCmd (fun () -> deps.Start id) JobActioned
     | FinishWork id -> model, apiCmd (fun () -> deps.Complete id) JobActioned
+    | ProposeDelay (jobId, minutes) ->
+        match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
+        | None -> model, Cmd.none
+        | Some job ->
+            // Measured from the promise that currently stands, not from now: a
+            // provider who is already twenty minutes late and asks for "+15"
+            // means fifteen past the agreed time, not fifteen past this moment.
+            let from = (rescheduleOf job).PromisedStart
+            let req : ProposeRescheduleRequest =
+                { JobId = jobId
+                  ByRole = ActorRole.toWire ActorRole.Provider
+                  ProposedStart = (from.AddMinutes(float minutes)).ToString "o"
+                  Reason = sprintf "Running about %d minutes behind" minutes }
+            notify NoticeKind.Info (Some jobId) "Asked the customer for more time" model,
+            apiCmd (fun () -> deps.ProposeReschedule req) JobActioned
     | JobActioned job ->
         let jobs =
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)

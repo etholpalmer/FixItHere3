@@ -39,5 +39,6 @@ let createDepsWith
       PickPhoto = pickPhoto
       GetGpsLocation = gpsLocation
       GetClock = fun () -> Http.getEnv http "/demo/clock"
+      ProposeReschedule = fun req -> Http.postEnv http "/jobs/reschedule" req
       SendTyping = sendTyping
       SendSeen = sendSeen }

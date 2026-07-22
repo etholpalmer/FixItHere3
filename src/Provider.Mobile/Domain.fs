@@ -121,6 +121,10 @@ type Msg =
     | MarkArrived of jobId: int
     | BeginWork of jobId: int
     | FinishWork of jobId: int
+    /// Ask the customer for more time. The delay is chosen from a short list
+    /// rather than typed: the provider is in a vehicle, and a free-text time
+    /// picker is not a thing anyone completes at the roadside.
+    | ProposeDelay of jobId: int * minutes: int
     | JobActioned of JobDto
     | GpsTick of jobId: int
     | GpsFetched of jobId: int * lat: float * lng: float
@@ -195,6 +199,7 @@ type ProviderApiDeps =
       /// while disconnected cannot rebuild the map from ticks it never got —
       /// it has to ask.
       GetClock: unit -> Task<Result<DemoClockDto, string>>
+      ProposeReschedule: ProposeRescheduleRequest -> Task<Result<JobDto, string>>
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 

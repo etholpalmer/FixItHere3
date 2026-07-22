@@ -70,6 +70,7 @@ let stubDeps : ProviderApiDeps =
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.70, -79.45))
       GetClock = fun () -> Task.FromResult(Ok ({ DemoNow = ""; AnchorDemo = ""; AnchorReal = ""
                                                  Rate = 1.0; Running = true } : DemoClockDto))
+      ProposeReschedule = fun _ -> Task.FromResult(Ok (mkJob 1 "Scheduled"))
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 
@@ -407,3 +408,29 @@ let ``a malformed clock leaves the last known map in place`` () =
     Assert.True m.Clock.IsNone
     Assert.False m.TickActive
     Assert.True(List.isEmpty cmd)
+
+[<Fact>]
+let ``a delay is measured from the promise, not from now`` () =
+    // A provider already twenty minutes late who taps "+15" means fifteen past
+    // the agreed time, not fifteen past this moment. Measuring from now would
+    // quietly grant them the lateness they had already accrued.
+    let promised = DemoClock.epoch.AddHours 2.0
+    let job = { mkJob 7 "Scheduled" with PromisedStart = promised.ToString "o" }
+    let model = { Model.initial with Jobs = [ job ]; DemoNow = promised.AddMinutes 20.0 }
+
+    let captured = System.Collections.Generic.List<ProposeRescheduleRequest>()
+    let deps = { stubDeps with ProposeReschedule = fun r -> captured.Add r; Task.FromResult(Ok job) }
+    let _, cmd = Update.update deps (ProposeDelay (7, 15)) model
+    // Drain the Cmd — the request is built inside it, so a model-only
+    // assertion cannot see the value being tested.
+    for sub in cmd do sub (fun _ -> ())
+    System.Threading.Thread.Sleep 60
+    Assert.Equal(1, captured.Count)
+    Assert.Equal(promised.AddMinutes 15.0, DateTimeOffset.Parse captured.[0].ProposedStart)
+    Assert.Equal("Provider", captured.[0].ByRole)
+
+[<Fact>]
+let ``proposing tells the provider the ball is in the customer's court`` () =
+    let job = { mkJob 7 "Scheduled" with PromisedStart = (DemoClock.epoch.AddHours 2.0).ToString "o" }
+    let m = up (ProposeDelay (7, 15)) { Model.initial with Jobs = [ job ] }
+    Assert.Contains("Asked the customer", (List.head m.Notices).Text)

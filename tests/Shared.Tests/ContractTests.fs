@@ -522,3 +522,13 @@ let ``no countdown ever reads as both directions at once`` (aheadSeed: int) (now
     |> List.forall (fun c ->
         let line = (Countdown.oneLine c).ToLowerInvariant()
         not (line.Contains "arriving in" && line.Contains "late"))
+
+[<Fact>]
+let ``times render in the demo timeline, not the operator's timezone`` () =
+    // Caught on the device: the countdown read 00:23 while the proposed time
+    // beside it read 7:23 PM, because clockTime shifted a demo instant into the
+    // machine's local zone. Demo instants are on a fictional timeline; there is
+    // no "local" to convert them to.
+    let iso = DemoClock.epoch.AddMinutes(23.0).ToString "o"
+    Assert.Equal("12:23 AM", Format.clockTime iso)
+    Assert.Equal("1 Jan", Format.shortDate iso)

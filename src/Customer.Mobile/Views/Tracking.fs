@@ -61,8 +61,14 @@ let view (model: Model) (jobId: int) =
                 // beside it the moment the clock ran faster than 1x.
                 Travel.describe (Geo.distanceKm pos (job.Lat, job.Lng))
             | None -> "Locating provider…"
+        let sched : Reschedule = rescheduleOf job
+        // The no-show control follows the same rule the server enforces, so a
+        // button can never offer something the API will refuse.
+        let canReportNoShow =
+            (JobStateCodec.tryParse job.State |> Option.map JobStatus.awaitsArrival |> Option.defaultValue false)
+            && Reschedule.canReportNoShow model.DemoNow sched
         AnyView(
-            (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto ]) {
+            (Grid(coldefs = [ Star ], rowdefs = [ Auto; Auto; Star; Auto ]) {
                 (VStack(spacing = 4.) {
                     Button("← Back", GoBack)
                     Label(statusLine job.State).font(size = 20.)
@@ -80,11 +86,35 @@ let view (model: Model) (jobId: int) =
                     Label(sprintf "%s — %s (%s)" job.ProviderName job.ServiceName (Format.money job.Price))
                     Label(etaLine).font(size = 12.)
                 }).gridRow(0)
-                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(1)
+                // The answer bar. Present only while a proposal is live, and
+                // directly under the countdown that is running out on it —
+                // putting it below the map would hide the decision behind a
+                // scroll on the one screen where time is the point.
+                (HStack(spacing = 8.) {
+                    match sched.Pending with
+                    | Some p ->
+                        Label(sprintf "New time: %s" (Format.clockTime (p.ProposedStart.ToString "o")))
+                            .font(size = 15.)
+                            .textColor(Theme.ink)
+                            .centerVertical()
+                        Button("Accept", AnswerReschedule (job.Id, true))
+                            .textColor(Theme.onBrand)
+                            .background(Theme.brand)
+                        Button("Decline", AnswerReschedule (job.Id, false))
+                    | None -> ()
+                }).gridRow(1)
+
+                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(2)
                 (HStack(spacing = 8.) {
                     Button("Call", StartFakeCall)
                     Button("Chat", Navigate (Chat job.Id))
                     Button("Cancel Job", CancelActiveJob job.Id)
-                }).gridRow(2)
+                    // Appears only once the grace window has actually elapsed.
+                    // Escalation is mechanical, not scripted: the same clock
+                    // that runs the countdown decides when this exists.
+                    if canReportNoShow then
+                        Button("Report no-show", ReportNoShow job.Id)
+                            .textColor(Theme.danger)
+                }).gridRow(3)
             }).padding(12.)
         )

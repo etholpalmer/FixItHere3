@@ -23,16 +23,24 @@ let private tryParse (iso: string) =
         | _ -> None
 
 /// "3:42 PM" — what sits beside a chat bubble.
+///
+/// Rendered in the instant's own offset, deliberately NOT converted to the
+/// device's local zone. Every time in this product is a *demo* instant on a
+/// fictional timeline anchored at the epoch; shifting it into the operator's
+/// real timezone produced a screen where the countdown read 00:23 and the
+/// proposed time beside it read 7:23 PM. Two views of the same moment that
+/// disagree by four hours is exactly the kind of incoherence this build exists
+/// to remove.
 let clockTime (iso: string) =
     tryParse iso
-    |> Option.map (fun d -> d.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture))
+    |> Option.map (fun d -> d.ToString("h:mm tt", CultureInfo.InvariantCulture))
     |> Option.defaultValue ""
 
 /// "12 Jan" — what dates a review. Year-less on purpose: reviews inside the
 /// last twelve months read as current, and a year makes stale data conspicuous.
 let shortDate (iso: string) =
     tryParse iso
-    |> Option.map (fun d -> d.ToLocalTime().ToString("d MMM", CultureInfo.InvariantCulture))
+    |> Option.map (fun d -> d.ToString("d MMM", CultureInfo.InvariantCulture))
     |> Option.defaultValue ""
 
 /// "Mary O." — a reviewer is a person, but a full surname on a public profile

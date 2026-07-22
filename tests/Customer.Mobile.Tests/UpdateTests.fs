@@ -47,6 +47,16 @@ let ``resetTo clears history`` () =
     Assert.Equal(Home, m2.Screen)
     Assert.Empty(m2.History)
 
+/// Minimal job for stub returns. Declared before `stubDeps` because F# is
+/// order-sensitive and `mkJob` lives below it.
+let private stubJob : JobDto =
+    { Id = 1; CustomerId = 1; CustomerName = "John Reyes"; ProviderId = 1; ProviderName = "Mike's Plumbing"
+      ServiceId = 1; ServiceName = "Plumbing"; State = "Scheduled"; Price = 85m
+      ScheduledFor = "Now"; PromisedStart = "Now"
+      ProposedStart = ""; ProposedBy = ""
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true
+      Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
+
 let stubDeps : ApiDeps =
     { Login = fun _ _ -> Task.FromResult(Ok { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" })
       GetServices = fun () -> Task.FromResult(Ok [])
@@ -66,6 +76,8 @@ let stubDeps : ApiDeps =
                                                  Rate = 1.0; Running = true } : DemoClockDto))
       GetLocation = fun pid -> Task.FromResult(Ok ({ ProviderId = pid; Lat = 43.70; Lng = -79.40
                                                      UpdatedAt = "" } : LocationDto))
+      DecideReschedule = fun _ -> Task.FromResult(Ok stubJob)
+      ReportNoShow = fun _ -> Task.FromResult(Ok stubJob)
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 
@@ -392,3 +404,25 @@ let ``a malformed clock leaves the last known map in place`` () =
     Assert.True m.Clock.IsNone
     Assert.False m.TickActive
     Assert.True(List.isEmpty cmd)
+
+[<Fact>]
+let ``answering a proposal says what declining actually does`` () =
+    // Declining does not cancel anything — it holds the provider to the time
+    // they already agreed. The notice has to say so, or a customer reads
+    // "Decline" as a threat they did not intend to make.
+    let accepted = up (AnswerReschedule (7, true)) Model.initial
+    Assert.Contains("accepted", (List.head accepted.Notices).Text)
+    Assert.Equal(NoticeKind.Success, (List.head accepted.Notices).Kind)
+
+    let declined = up (AnswerReschedule (7, false)) Model.initial
+    Assert.Contains("original time still stands", (List.head declined.Notices).Text)
+    Assert.Equal(NoticeKind.Warning, (List.head declined.Notices).Kind)
+
+[<Fact>]
+let ``answering a proposal actually calls the server`` () =
+    // The guard lives in the emitted Cmd; a model-only assertion would pass
+    // against a handler that queued a notice and did nothing else.
+    let _, cmd = Update.update stubDeps (AnswerReschedule (7, true)) Model.initial
+    Assert.False(List.isEmpty cmd)
+    let _, noShowCmd = Update.update stubDeps (ReportNoShow 7) Model.initial
+    Assert.False(List.isEmpty noShowCmd)

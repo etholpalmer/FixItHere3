@@ -137,6 +137,21 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | DismissNotice id -> { model with Notices = Notify.dismiss id model.Notices }, Cmd.none
     | CancelActiveJob jobId ->
         model, apiCmd (fun () -> deps.CancelJob jobId) HubJobUpdated
+    | AnswerReschedule (jobId, accept) ->
+        let req : RescheduleDecisionRequest =
+            { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer; Accept = accept }
+        // The wording matters: declining does not cancel anything, it holds the
+        // provider to the time they already agreed. Saying so here stops the
+        // decline reading as a threat the customer did not intend.
+        let said =
+            if accept then "New arrival time accepted"
+            else "Declined — the original time still stands"
+        notify (if accept then NoticeKind.Success else NoticeKind.Warning) (Some jobId) said model,
+        apiCmd (fun () -> deps.DecideReschedule req) HubJobUpdated
+    | ReportNoShow jobId ->
+        let req : ReportNoShowRequest =
+            { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer }
+        model, apiCmd (fun () -> deps.ReportNoShow req) HubJobUpdated
     | MessagesLoaded xs ->
         // Reset the seen watermark when a chat loads — a value carried over from
         // another job can exceed this job's older ids and render a false marker.

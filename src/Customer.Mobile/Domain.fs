@@ -120,6 +120,14 @@ type Msg =
     | BookJob of providerId: int * serviceId: int * schedule: string
     | JobCreated of JobDto
     | CancelActiveJob of jobId: int
+    /// Answer a pending proposal. Accepting moves the promise; declining leaves
+    /// the original standing, which is what makes the no-show countdown resume
+    /// rather than restart.
+    | AnswerReschedule of jobId: int * accept: bool
+    /// Only offered once the grace window has actually elapsed — the server
+    /// refuses it otherwise, and the button follows the same rule so the two
+    /// cannot disagree.
+    | ReportNoShow of jobId: int
     | MessagesLoaded of MessageDto list
     | ChatDraftChanged of jobId: int * text: string
     | SendChatMessage of jobId: int * text: string * photoBase64: string
@@ -187,6 +195,8 @@ type ApiDeps =
       /// launch never appears and the ETA line reads "Locating provider…"
       /// forever — on a Scheduled job that can be the entire wait.
       GetLocation: int -> Task<Result<LocationDto, string>>
+      DecideReschedule: RescheduleDecisionRequest -> Task<Result<JobDto, string>>
+      ReportNoShow: ReportNoShowRequest -> Task<Result<JobDto, string>>
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 
