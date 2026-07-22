@@ -10,11 +10,81 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-20 (Phase 0 of the believability rebuild complete)
+- **Last Updated:** 2026-07-22 (Phases 0–3 complete; two-app walkthrough partially run; Phase 4 not started)
 
 ---
 
 ## Lessons
+
+### 2026-07-22 — Rendering defects are structurally invisible to a green test suite
+
+**Insight:** Across one session, every defect found after booting a simulator had been invisible to a passing suite — at the time, 179 to 194 tests, both apps compiling at 0 errors / 0 warnings. In each case the value was correct, correctly typed, and correctly plumbed; it was simply never passed through the function that exists to present it, or two individually-correct halves were composed into a wrong whole. No unit test can see that, because each half passes its own assertion.
+
+**Discovery:** The user insisted on a simulator screenshot before building the next feature on top of the countdown. The first screenshot found a bug; so did nearly every screenshot after it.
+
+**Design intent:** The plan's `-t:Compile` gate was adopted because the test projects compile only `Domain.fs`, `Api.fs` and `Update.fs` — never `Views/*.fs`. That gate is sound and does what it claims: it catches a view referencing a `Msg` that no longer exists. The error was treating "the code compiles and the logic is tested" as evidence about *the product*, and reporting both with the same confidence.
+
+**Bug categorisation** — what would have caught each most cheaply:
+
+| Defect | Cheapest catcher |
+|---|---|
+| `"Arriving in 3:06 late"` (sign-blind label + "late" suffix) | **Screenshot** — each half correct alone |
+| Countdown 00:23 vs proposal 7:23 PM (local-time conversion) | **Screenshot** — internally consistent either side |
+| `Scheduled for: 2026-01-01T00:31:31.5622679+00:00` | **Screenshot** — or a lint rule banning raw DTO date fields in views |
+| `Price: $277.5` | **Screenshot** — or the same lint rule for money |
+| Map flashing 4×/second | **Screenshot** — no metric available to the suite |
+| Chat entry collapsed to zero width | **Screenshot** — layout has no test surface |
+| Provider rows truncating off-screen | **Screenshot at device width** |
+| `Nav.resetTo` skipping the position fetch | **Cmd-draining unit test** — was cheap and simply not written |
+| Cancel with no confirmation | **Design review** — not a defect, an omission |
+
+Only one of nine was recoverable by a cheaper test. The rest genuinely required looking.
+
+**Impact:** "Tests pass and it compiles" and "I have seen it" are different claims and must be reported as such. Phase 4 is a full visual redesign; it runs screenshot-first, not screenshot-at-the-end.
+
+**Active mitigation:** `xcrun simctl io <udid> screenshot` works without the MCP integration and needs no Xcode selection, so a screenshot is always available even when the panel is not. The iOS 26.5 simulator runtime is now installed, so a full build is ~2.5 min and a screenshot is one command.
+
+**Resolution:** The companion gap "the in-app WebView map redesign has never been looked at" was archived 2026-07-22 once the simulator runtime landed and the map was screenshotted. The *reasoning* in this lesson stays active permanently — it is a claim about what test suites can and cannot observe, not about one screen.
+
+**Related:** [Mistake: memoised the map's HTML string but rebuilt its source object](#2026-07-22--memoised-the-maps-html-string-but-rebuilt-its-source-object-every-render), [Mistake: a correct, mutation-tested fix caused a regression in what it stopped doing](#2026-07-22--a-correct-mutation-tested-fix-caused-a-regression-in-what-it-stopped-doing)
+
+---
+
+### 2026-07-22 — A metric that cannot observe the failure it is being used to rule out
+
+**Insight:** I claimed the tracking map was not reloading because the backend logged zero SignalR reconnections across 25 seconds. The metric was incapable of detecting the failure: the WebView reloaded and re-established its connection faster than a dropped connection took to surface server-side. A screenshot that looked washed out *was* the real signal, and I explained it away because the metric I had chosen disagreed with it.
+
+**Discovery:** The user reported the map visibly flashing, hours after I had declared it stable.
+
+**Impact:** Before using an absence-of-signal as proof, state what the signal's latency and threshold are, and whether the failure mode would clear them. "Zero X observed" is only evidence if X would have appeared within the observation window. The generalisable name is **metric-blindness to the observed failure**: the check ran, returned clean, and could not have returned anything else.
+
+**Related:** [Mistake: memoised the map's HTML string but rebuilt its source object](#2026-07-22--memoised-the-maps-html-string-but-rebuilt-its-source-object-every-render)
+
+---
+
+### 2026-07-22 — Composition defects: two correct halves, one wrong whole
+
+**Insight:** Three separate user-visible defects this session had the same shape — each component was correct in isolation and the composition was wrong. `Countdown` returned a sign-blind label ("Arriving in") while `Format.countdown` appended "late" to the value, producing "Arriving in 3:06 late". `Format.clockTime` converted to local time (correct for a real timestamp) while the countdown ran on demo time (correct for a fictional one), producing a headline and a body four hours apart. The map memoised its HTML string (correct) inside a freshly-constructed source object (also correct in isolation).
+
+**Impact:** Unit tests are per-component by construction, so this class is invisible to them by construction too. The catch is either a screenshot, or a test that asserts on the *composed* output — `Countdown.oneLine` now exists partly so a property test can assert a rendered line never contains both directions at once.
+
+**Active mitigation:** `Countdown.oneLine` plus the property test `no countdown ever reads as both directions at once` ([tests/Shared.Tests/ContractTests.fs](tests/Shared.Tests/ContractTests.fs)). The pattern generalises: when two pure functions will be concatenated for display, test the concatenation.
+
+**Related:** [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
+
+---
+
+### 2026-07-22 — Delete unreachable code rather than repairing it
+
+**Insight:** The plan listed "StartDemo hardcodes customer 1" as tell 25. Task 0a had already removed every UI entry point, so the code was unreachable — repairing the id would have been motion, not progress, and would have kept a demo-scaffolding dependency (`StartDemo: int -> int -> Task<...>`) in both shipping apps' `ApiDeps`.
+
+**Discovery:** Grepping the views for `StartDemo` before starting the fix returned zero dispatches in either app.
+
+**Impact:** Before fixing a defect inherited from a plan, confirm the defective path is still reachable. A plan written before earlier tasks landed can describe a world that no longer exists. Deleting removed one `Msg` case, one `DemoStarted` case, one dep and one Api implementation per app.
+
+**Related:** [Compromise: Provider.Mobile's in-app "Start Demo" button hardcodes customer id 1](#2026-07-18--providermobiles-in-app-start-demo-button-hardcodes-customer-id-1) (archived)
+
+---
 
 ### 2026-07-18 — F# record auto-properties don't populate EF Core `DbSet<T>` the way C# does
 
@@ -325,6 +395,134 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Mistakes & Fixes
 
+### 2026-07-22 — Memoised the map's HTML string but rebuilt its source object every render
+
+**Symptom:** The in-app tracking map visibly flashed several times a second. Reported by the user after I had declared it stable.
+
+**Attempted:** Caught by the user looking at the running app — see [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite). My earlier "verification" measured backend SignalR reconnections and found none; that metric could not observe this failure — see [Lesson: a metric that cannot observe the failure it is being used to rule out](#2026-07-22--a-metric-that-cannot-observe-the-failure-it-is-being-used-to-rule-out).
+
+**Root Cause:** Executor note 8 warned that a 250 ms countdown tick would re-run the view function and could reload the WebView. I memoised `MapHtml.render`'s output string — necessary but not sufficient, because the view then wrapped it in `HtmlWebViewSource(Html = ...)`, constructing a **new object** every render. Fabulous diffs the attribute by reference and re-set it four times a second.
+
+**Fix:** Memoise the `HtmlWebViewSource` *instance*, keyed on `(lat, lng, providerId)` — [src/Customer.Mobile/Views/Tracking.fs](src/Customer.Mobile/Views/Tracking.fs) and [src/Provider.Mobile/Views/ActiveJob.fs](src/Provider.Mobile/Views/ActiveJob.fs).
+
+**Prevention:** When memoising to defeat a diff, memoise the value the diff actually compares — not an input to it.
+
+**Time Lost:** ~40 min, plus hours shipped in a "fixed" state.
+
+**Severity:** High — the tracking map is the demo's centrepiece.
+
+**Related:** [Mistake: the in-app map had never received a live position because the backend had no CORS policy](#2026-07-22--the-in-app-map-had-never-received-a-live-position-because-the-backend-had-no-cors-policy)
+
+---
+
+### 2026-07-22 — The in-app map had never received a live position because the backend had no CORS policy
+
+**Symptom:** The customer's tracking map showed one dot, not two. Adding an initial-position `fetch` did not help.
+
+**Attempted:** First assumed the provider marker was mis-styled; then found it was *initialised at the job's coordinate*, so both markers occupied the same point and amber painted over blue. Fixing that exposed the deeper problem: the fetch returned nothing.
+
+**Root Cause:** `MapHtml` is an HTML **string** loaded into a WebView, so its document origin is `null` and every request it makes is cross-origin. The backend had no CORS policy at all. The initial fetch was blocked — and so was SignalR's `negotiate`, meaning the in-app map had most likely never received a live position in the project's history. The `/dev` console works because it is served same-origin from `wwwroot`, which is exactly why nobody noticed.
+
+**Fix:** `AddCors`/`UseCors` with `AllowAnyOrigin` (no `AllowCredentials`) in [src/Backend.Api/Program.fs](src/Backend.Api/Program.fs), scoped and justified in a comment as correct for a local demo backend holding no credentials.
+
+**Prevention:** A WebView fed an HTML string is a null-origin client of your own API. Treat it as a third party.
+
+**Time Lost:** ~30 min.
+
+**Severity:** High — a core feature that had never worked, presented as working.
+
+---
+
+### 2026-07-22 — `Info.plist` edits silently did not reach the built app
+
+**Symptom:** Added `UIUserInterfaceStyle = Light` to both apps' `Info.plist`, rebuilt, relaunched against a dark simulator — the app still rendered dark. `plutil -lint` said the source file was valid and `plutil -extract` read the key back from it.
+
+**Attempted:** Re-read the source plist (correct), checked XML comment placement (valid), suspected MAUI stripped comments.
+
+**Root Cause:** MAUI caches the plist-processing step. An incremental build reused the previously-packaged bundle, so the key was in the source and absent from `Customer.Mobile.app/Info.plist`. The difference is only visible by extracting from the **built** bundle.
+
+**Fix:** `rm -rf obj/Debug/net10.0-ios bin/Debug/net10.0-ios` and rebuild. Provider's intermediates cleared preemptively.
+
+**Prevention:** After changing any file consumed by the Apple asset/plist pipeline, verify against the built `.app`, never the source. Same pipeline (`actool`) that caused the earlier CI failures.
+
+**Time Lost:** ~25 min.
+
+**Severity:** Medium — and it invalidated a "one line of cheap insurance" claim made to the user.
+
+---
+
+### 2026-07-22 — A correct, mutation-tested fix caused a regression in what it stopped doing
+
+**Symptom:** During the two-app walkthrough, the customer's tracking screen sat on "Locating provider…" for the entire wait, even though the map itself found the provider.
+
+**Attempted:** Caught by the walkthrough — see [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite).
+
+**Root Cause:** Task 12 fixed back-re-books by changing `JobCreated` from `Nav.push` to `Nav.resetTo`. That fix was correct and mutation-tested. But `Nav.resetTo` does not pass through the `Navigate` handler, and the `Navigate (Tracking _)` branch was where `GetLocation` was dispatched — so arriving at Tracking *by booking* silently stopped seeding the provider's position.
+
+**Fix:** Dispatch `GetLocation` from the `JobCreated` handler too — [src/Customer.Mobile/Update.fs](src/Customer.Mobile/Update.fs).
+
+**Prevention:** When changing *how* a screen is reached, enumerate what the old route did on the way. The defect lives in the omission, not the change, so neither a test of the old behaviour nor of the new one sees it.
+
+**Time Lost:** ~15 min.
+
+**Severity:** Medium.
+
+---
+
+### 2026-07-22 — Scripted regex edits corrupted layout-sensitive F#, twice
+
+**Symptom:** A Python script wrapping ten view files in `ScrollView` broke four of them with `FS0010`/`FS0193`. Earlier the same day, a scripted record-field insertion mis-aligned continuation lines and broke two more.
+
+**Attempted:** First occurrence fixed by hand; second occurrence repeated the same approach at larger scale before reverting with `git checkout`.
+
+**Root Cause:** F# is indentation-significant and its layout rules interact with record-field alignment and CE nesting. Regex patterns that match structure ("the outer `(VStack ... ).padding(N)`") do not survive the per-file variation (`.centerVertical().padding()`, a `match` arm wrapper, differing indentation).
+
+**Fix:** Reverted, then used exact-literal replacements with `assert` on uniqueness, one file at a time, compiling after each batch.
+
+**Prevention:** For F#, script only exact-literal substitutions with a uniqueness assertion. Never pattern-match layout.
+
+**Time Lost:** ~35 min across both occurrences.
+
+**Severity:** Medium — no shipped defect, pure rework.
+
+---
+
+### 2026-07-22 — Fabulous CE rejects nested layout containers (FS0792), hit three times
+
+**Symptom:** `error FS0792: This construct is ambiguous as part of a computation expression. Nested expression...` when adding a `VStack` inside a `for` in a CE, an `HStack` inside a `VStack`, and a per-row `VStack` in a list.
+
+**Attempted:** Each time, restructured to a flat sequence of siblings.
+
+**Root Cause:** Fabulous 2.4's CE builder does not accept a nested container in these positions. Already recorded once (the login form), and walked into three more times because the constraint was in the journal rather than in the code.
+
+**Fix:** Flat siblings, with the reason written as a comment at each site rather than only in this file.
+
+**Prevention:** The comment at the call site is the mitigation; the journal entry alone demonstrably did not prevent recurrence.
+
+**Time Lost:** ~20 min total.
+
+**Severity:** Low.
+
+---
+
+### 2026-07-22 — 686 NuGet packages missing `.nuspec` blocked any clean clone
+
+**Symptom:** A fresh `git clone` of the repo failed to restore with `NU5037: The package is missing the required nuspec file`. The working copy built fine.
+
+**Attempted:** Repaired the first blocking package, hit the next, and looped — 55 packages for this solution alone.
+
+**Root Cause:** Residue of the earlier disk-full event. Extracted package directories lost their `.nuspec` while retaining an intact `.nupkg`. The working copy never noticed because `obj/` was already populated and restore did not re-resolve.
+
+**Fix:** Re-extract each `.nuspec` from the package's own `.nupkg` — non-destructive, restores a file that belongs there. Swept all 510 recoverable packages; 91 have no `.nupkg` and need re-download (all belong to other projects).
+
+**Prevention:** After a disk-full event, verify with a clean clone, not the working copy. `git clone` + `dotnet test` is a two-minute check that a green working tree cannot substitute for.
+
+**Time Lost:** ~25 min.
+
+**Severity:** Medium — invisible locally, total for anyone else.
+
+---
+
 ### 2026-07-20 — A subagent's self-report is not verification: review found a real bug under a clean summary
 
 **Symptom:** A subagent completed plan task 0a and reported success with verbatim-looking evidence — both apps compiling at 0/0, 97 tests passing, and a clean grep. All of that was true.
@@ -633,6 +831,59 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Solution Gaps
 
+### 2026-07-22 — The two-app walkthrough is only half run
+
+**Current State:** Sign-in, job isolation with two live clients, booking through the real flow, the booking appearing live on the provider, accept, and the full running-late propose/answer loop are all verified on two simulators with screenshots.
+
+**Limitation:** Depart, chat across two devices (typing indicator and seen receipts crossing), arrive, start work, complete, **payment**, and **rating** have never been exercised on two real apps. Payment is the significant one — the customer's total beside the provider's payout is the marketplace story and the screen an investor studies.
+
+**Ideal Solution:** Finish the remaining beats, screenshotting each.
+
+**Closing this gap requires:**
+1. Boot both simulators, install current builds (~10 min including a provider rebuild) — pending
+2. Drive depart → arrive → work → complete, watching the map and both countdowns — pending
+3. Chat across devices, checking typing/seen cross the wire — pending
+4. Payment on both phones side by side — pending
+5. Rating both ways, job closes — pending
+
+**Priority:** High — it is the plan's stated acceptance mechanism, and every prior beat found defects.
+
+**Related:** [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
+
+---
+
+### 2026-07-22 — Four presentation defects found by the walkthrough, deferred to Phase 4
+
+**Current State:** Catalog shows bare trade names; `ProviderList` shows `★0.0 (0)` for unrated providers; all of a provider's reviews are attributed to one customer; `JobDetail`'s countdown is not urgency-coloured.
+
+**Limitation:** Each is a visible tell. None is behavioural.
+
+**Ideal Solution:** Fix with the redesign of the screen each lives on, rather than twice.
+
+**Closing this gap requires:**
+1. Render `ServiceDto.FromPrice` in Catalog ("Plumbing · from $277") — pending, plan task 14
+2. `★0.0 (0)` → "New" in ProviderList — pending, plan task 14
+3. `Seed.fs`: draw raters from customers other than the job's own; re-verify the determinism fingerprint — pending
+4. `urgencyColor` on JobDetail's countdown — pending, plan task 16
+
+**Priority:** Medium — deferred deliberately, tracked so it cannot be lost.
+
+---
+
+### 2026-07-22 — Two simulators are at the edge of this machine's headroom
+
+**Current State:** Running the customer and provider apps on two booted simulators worked, but the customer simulator shut itself down once mid-walkthrough and needed rebooting, and two `tap` calls failed with "the simulator likely rebooted" before succeeding on retry.
+
+**Limitation:** The two-app walkthrough — the plan's acceptance mechanism — is the most resource-intensive thing this project does. Disk fell from 43 GB to 24 GB across the session (iOS 26.5 runtime ~8 GB, plus two debug app builds).
+
+**Ideal Solution:** Check `df -h /` before starting, `dotnet clean` at phase boundaries, and expect to retry gestures rather than treating a timeout as a failure.
+
+**Priority:** Medium — it does not block, but it makes the acceptance step flaky.
+
+**Related:** [Gap: no disk-headroom check before/during long MAUI build-heavy agentic sessions](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
+
+---
+
 ### 2026-07-20 — Verified live defects surfaced by plan audit; none yet fixed
 
 **Current State:** A three-lens audit of the believability plan surfaced defects in the *shipped* code that no prior review, test or walkthrough had caught. Every one below was verified against source or the running system.
@@ -684,24 +935,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 **Priority:** Medium — the gap is real coverage, but the local `dotnet build -f net10.0-maccatalyst` still catches the same class of breakage on a developer machine.
 
 **Related:** [Mistake: CI went red on its first run](#2026-07-19--ci-went-red-on-its-first-run-because-the-test-suite-was-never-re-run-after-the-redesign)
-
----
-
-### 2026-07-19 — The in-app WebView map redesign has never been looked at
-
-**Current State:** [MapHtml.fs](src/ClientShared/MapHtml.fs) was restyled in `9c33d32` — amber provider marker with a breathing halo, dark destination pin, reduced-motion path.
-
-**Limitation:** It renders only inside a native Mac Catalyst WebView, which cannot be driven by the available browser tooling. Verification so far is: both apps compile (which type-checks the `sprintf` format string), the rendered HTML contains zero unresolved `%%`, keyframes emit as `0%` / `100%`, and the placeholders bind. Nobody has seen it draw.
-
-**Ideal Solution:** Open the rendered HTML in a normal browser at the same viewport, or drive the running app and screenshot the tracking screen.
-
-**Closing this gap requires:**
-1. Serve the `MapHtml.render` output as a static route under `/dev` so it can be opened in a browser — under an hour, and useful permanently as a preview harness — pending
-2. Or perform the two-app manual walkthrough and look at the tracking screen — no code, just the walkthrough that is already outstanding — pending
-
-**Priority:** Medium — the risk is cosmetic, but it is the surface the demo audience actually watches.
-
-**Related:** [Gap: the two-app manual acceptance walk](#2026-07-18--task-12s-two-app-manual-acceptance-walk-and-final-per-task-review-were-not-completed-before-disk-exhaustion-interrupted-the-session)
 
 ---
 
@@ -821,6 +1054,36 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Compromises
 
+### 2026-07-22 — Both apps are pinned to Light appearance
+
+**Tradeoff:** `UIUserInterfaceStyle = Light` in both `Info.plist` files, so the apps ignore the device's Dark Mode preference.
+
+**Reason:** `ClientShared/Theme.fs` uses concrete hex because MAUI does not surface iOS semantic colours (`label`, `systemBackground`) through Fabulous. On a dark device the result was dark system chrome around light-only content — white bubbles against a black status bar. A demo has no opportunity to recover from that.
+
+**Impact:** Anyone who prefers Dark Mode gets Light. For a pitch demo that is invisible; for a shipped product it would not be.
+
+**Prevention going forward:** The rationale is written **in the plist, at the point someone would delete the key** — not only here. Lifting the pin is gated on a real dark palette existing in `Theme.fs`, which is Phase 4 work.
+
+**Revisit When:** `Theme.fs` gains a dark ramp, or Fabulous exposes MAUI's `AppThemeBinding`.
+
+**Related:** [Mistake: `Info.plist` edits silently did not reach the built app](#2026-07-22--infoplist-edits-silently-did-not-reach-the-built-app)
+
+---
+
+### 2026-07-22 — Sessions are stored in plain `Preferences`, not `SecureStorage`
+
+**Tradeoff:** The signed-in session (token, user id, role, display name) is written to unencrypted `Preferences`.
+
+**Reason:** The token is literally `"fake-customer-1"` (see [src/Backend.Api/Auth.fs](src/Backend.Api/Auth.fs)). Putting it behind the keychain would dress a demo credential up as a real one — the same reasoning that keeps the demo password unhashed rather than pretending to a credential store this prototype does not have.
+
+**Impact:** None while the token is fake. The moment real auth arrives, this must move.
+
+**Prevention going forward:** Stored as four flat keys under a `fixithere.session.` prefix with the rationale in a comment at the store; restore requires *all* fields, so a partial write yields "not signed in" rather than an actor with no id. Real auth must change the storage in the same commit that changes the token.
+
+**Revisit When:** Tokens stop being `fake-*`.
+
+---
+
 ### 2026-07-19 — The demo console is dark, against the stated consumer-marketplace direction
 
 **Tradeoff:** Asked what FixItHere should feel like, the answer was "consumer-marketplace polish — warm and approachable, like Uber or Thumbtack". The `/dev` console shipped as a dark, true-neutral instrument surround instead. The in-app WebView map stayed light and consumer-facing.
@@ -917,6 +1180,33 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
+## Archive
+
+> Entries moved here when the underlying condition no longer applies.
+> Kept for historical context.
+
+### 2026-07-19 — The in-app WebView map redesign has never been looked at
+
+**Current State:** [MapHtml.fs](src/ClientShared/MapHtml.fs) was restyled in `9c33d32` — amber provider marker with a breathing halo, dark destination pin, reduced-motion path.
+
+**Limitation:** It renders only inside a native Mac Catalyst WebView, which cannot be driven by the available browser tooling. Verification so far is: both apps compile (which type-checks the `sprintf` format string), the rendered HTML contains zero unresolved `%%`, keyframes emit as `0%` / `100%`, and the placeholders bind. Nobody has seen it draw.
+
+**Ideal Solution:** Open the rendered HTML in a normal browser at the same viewport, or drive the running app and screenshot the tracking screen.
+
+**Closing this gap requires:**
+1. Serve the `MapHtml.render` output as a static route under `/dev` so it can be opened in a browser — under an hour, and useful permanently as a preview harness — pending
+2. Or perform the two-app manual walkthrough and look at the tracking screen — no code, just the walkthrough that is already outstanding — pending
+
+**Priority:** Medium — the risk is cosmetic, but it is the surface the demo audience actually watches.
+
+**Related:** [Gap: the two-app manual acceptance walk](#2026-07-18--task-12s-two-app-manual-acceptance-walk-and-final-per-task-review-were-not-completed-before-disk-exhaustion-interrupted-the-session)
+
+---
+
+**Archived 2026-07-22** — closed. The iOS 26.5 simulator runtime was installed, the app was built, launched and screenshotted, and the map has now been looked at repeatedly. Doing so immediately found two defects it had been hiding: it flashed several times a second, and it had never received a live position because the backend had no CORS policy (the WebView's document origin is `null`).
+
+---
+
 ### 2026-07-18 — Provider.Mobile's in-app "Start Demo" button hardcodes customer id 1
 
 **Tradeoff:** The Provider.Mobile `DevSettings` screen's "▶ Start Demo (as this provider)" button calls `deps.StartDemo 1 s.UserId` — customer id `1` is hardcoded rather than derived from any session or selection. (Customer.Mobile's equivalent button correctly uses its own logged-in session's id, and separately picks an online provider or falls back to the first one.)
@@ -933,10 +1223,10 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
-## Archive
+**Archived 2026-07-22** — resolved by deletion, commit `1016af1`. Task 0a had already removed every UI entry point, so the code was unreachable; repairing the hardcoded id would have kept a demo-scaffolding dependency in both shipping apps. The `Msg` case, the `DemoStarted` case, the `ApiDeps` field and the Api implementation are gone from both apps.
 
-> Entries moved here when the underlying condition no longer applies.
-> Kept for historical context.
+---
+
 
 ### 2026-07-18 — MAUI workload not installed; Customer.Mobile (Plan 2) cannot build yet
 
