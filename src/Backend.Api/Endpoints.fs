@@ -71,7 +71,11 @@ let mapAll (app: WebApplication) =
 
     app.MapGet("/services", Func<AppDb, IResult>(fun db ->
         okJson (db.Services.OrderBy(fun s -> s.Id)
-                |> Seq.map (fun s -> { Id = s.Id; Name = s.Name })
+                |> Seq.map (fun s ->
+                    let r = ServiceRate.forService s.Name
+                    { Id = s.Id; Name = s.Name
+                      FromPrice = ServiceRate.quote s.Name
+                      TypicalMinutes = r.TypicalMinutes })
                 |> List.ofSeq))) |> ignore
 
     app.MapGet("/providers", Func<AppDb, Nullable<int>, Nullable<float>, Nullable<float>, IResult>(

@@ -22,7 +22,12 @@ type LoginResponse = { Token: string; UserId: int; Role: string; DisplayName: st
 type CustomerDto = { Id: int; Name: string; Email: string }
 
 [<CLIMutable>]
-type ServiceDto = { Id: int; Name: string }
+type ServiceDto =
+    { Id: int; Name: string
+      /// Indicative price for a typical job of this trade, so the catalogue can
+      /// say "from $277" rather than listing bare trade names.
+      FromPrice: decimal
+      TypicalMinutes: int }
 
 [<CLIMutable>]
 type ProviderDto =

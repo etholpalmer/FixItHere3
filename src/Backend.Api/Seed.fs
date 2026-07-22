@@ -65,12 +65,21 @@ let run (db: AppDb) =
 
     let customers = db.Customers.Local |> Seq.toArray
     let provs = db.Providers.Local |> Seq.toArray
+    let svcNameOf serviceId =
+        (db.Services.Local |> Seq.find (fun sv -> sv.Id = serviceId)).Name
     let mkJob i state =
         let c = customers.[i % customers.Length]
         let p = provs.[(i * 3) % provs.Length]
         { Id = 0; CustomerId = c.Id; ProviderId = p.Id; ServiceId = p.ServiceId
           State = state
-          Price = decimal (40 + rng.Next(0, 25) * 5)
+          // Real invoices vary around the quote — the work runs long or short.
+          // +/- 20% in 5-minute steps off the trade's typical duration keeps the
+          // spread believable and tied to the service, instead of a bare random
+          // number that had nothing to do with the trade.
+          Price =
+              let rate = ServiceRate.forService (svcNameOf p.ServiceId)
+              let jitter = rate.TypicalMinutes * (80 + rng.Next(0, 9) * 5) / 100
+              ServiceRate.total rate jitter
           ScheduledFor = DateTimeOffset.Parse(Epoch).AddHours(float i).ToString("o")
           Lat = c.Lat; Lng = c.Lng
           Address = c.Address }

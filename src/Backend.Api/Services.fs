@@ -61,6 +61,7 @@ type JobService(db: AppDb, hub: IBroadcaster) =
             // customer record supplies the real one. Without this a booked job
             // reads "Address: My location" on the provider's screen, which is
             // the one job the demo audience actually watches.
+            let svcName = db.Services.Single(fun sv -> sv.Id = req.ServiceId).Name
             let cust = db.Customers.SingleOrDefault(fun c -> c.Id = req.CustomerId)
             let resolvedAddress, resolvedLat, resolvedLng =
                 if obj.ReferenceEquals(cust, null) then req.Address, req.Lat, req.Lng
@@ -68,7 +69,9 @@ type JobService(db: AppDb, hub: IBroadcaster) =
             let job =
                 { Id = 0; CustomerId = req.CustomerId; ProviderId = req.ProviderId
                   ServiceId = req.ServiceId; State = "Scheduled"
-                  Price = 85.00m
+                  // Priced from the trade rather than a flat rate: a plumbing
+                  // call and a house clean costing the same is a tell.
+                  Price = ServiceRate.quote svcName
                   ScheduledFor = req.ScheduleChoice
                   Lat = resolvedLat; Lng = resolvedLng; Address = resolvedAddress }
             ignore prov
