@@ -209,6 +209,17 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   letter-spacing: 0;
   vertical-align: 0.55em;
 }
+/* A live negotiation is the one thing on a job card the operator must not
+   miss, so it gets the only warm accent in the list. */
+.job-proposal {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--brand);
+  background: color-mix(in oklch, var(--brand) 10%, transparent);
+  font-size: var(--t-xs);
+  color: var(--ink);
+}
+
 #rateButtons button[aria-pressed="true"] {
   background: var(--brand);
   border-color: var(--brand);
@@ -475,6 +486,7 @@ input::placeholder { color: var(--faint); }
       <span class="conn-dot" aria-hidden="true"></span><span id="connText">Connecting</span>
     </span>
     <button class="btn-primary" id="btnStartDemo">Start demo</button>
+    <button id="btnStartLate">Start demo · running late</button>
     <button id="btnReset">Reset</button>
   </div>
 </header>
@@ -705,6 +717,7 @@ function renderJobs(jobs) {
 
     const svc = document.createElement("div");
     svc.className = "job-svc";
+
     /* The promised time relative to *demo* now, not the browser's clock — the
        operator's whole job is spotting when the phones and the world disagree,
        so the console has to be reading the same world they are.
@@ -741,7 +754,15 @@ function renderJobs(jobs) {
       acts.append(track);
     }
 
-    card.append(head, parties, svc, acts);
+    if (j.proposedStart) {
+      const prop = document.createElement("div");
+      prop.className = "job-proposal";
+      prop.textContent =
+        `${j.proposedBy} proposed ${relativeToDemo(j.proposedStart)} — ${j.proposalReason}`;
+      card.append(head, parties, svc, prop, acts);
+    } else {
+      card.append(head, parties, svc, acts);
+    }
     host.append(card);
   }
 
@@ -806,11 +827,14 @@ async function refreshJobs() {
      jobs waiting only on payment. Sorting the whole list by promised time
      alone put seeded *Completed* jobs on top — their arrival is legitimately
      in the past, so they win a soonest-first race permanently. */
-  const RANK = { EnRoute: 0, Arrived: 0, InProgress: 0, Scheduled: 1, Completed: 2 };
+  const RANK = { EnRoute: 1, Arrived: 1, InProgress: 1, Scheduled: 2, Completed: 3 };
+  /* A live proposal outranks everything: it expires in five demo minutes and
+     is the one thing on this board with a deadline of its own. */
+  const rank = j => j.proposedStart ? 0 : (RANK[j.state] ?? 4);
   const active = jobs
     .filter(j => !["Closed", "Cancelled"].includes(j.state))
     .sort((a, b) =>
-      (RANK[a.state] ?? 3) - (RANK[b.state] ?? 3) ||
+      rank(a) - rank(b) ||
       (new Date(a.promisedStart) - new Date(b.promisedStart)) ||
       (b.id - a.id));
   renderJobs(active);
@@ -909,11 +933,11 @@ async function moveAlongRoute(pct) {
   log(`Routed provider ${pid} to ${pct}% toward job #${topActiveJob.id} (${next.lat.toFixed(4)}, ${next.lng.toFixed(4)})`, "loc");
 }
 
-async function startDemo() {
+async function startDemo(late = false) {
   const customerId = parseInt($("customer").value, 10);
   const providerId = parseInt($("provider").value, 10);
-  const job = await api("POST", "/dev/demo/start", { customerId, providerId });
-  if (job) log(`Demo started — job #${job.id}`, "job");
+  const job = await api("POST", "/dev/demo/start", { customerId, providerId, late });
+  if (job) log(`Demo started${late ? " (running late)" : ""} — job #${job.id}`, "job");
 }
 
 async function resetDemo() {
@@ -923,7 +947,8 @@ async function resetDemo() {
   await refresh();
 }
 
-$("btnStartDemo").addEventListener("click", startDemo);
+$("btnStartDemo").addEventListener("click", () => startDemo(false));
+$("btnStartLate").addEventListener("click", () => startDemo(true));
 $("btnReset").addEventListener("click", resetDemo);
 $("btnCreateJob").addEventListener("click", createJob);
 $("btnMsgCustomer").addEventListener("click", () => injectMsg(true));

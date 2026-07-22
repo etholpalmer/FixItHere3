@@ -10,6 +10,7 @@ open Xunit
 open FixItHere.Shared
 open FixItHere.Shared.Dtos
 open FixItHere.Backend.Tests.AppFactory
+open System.Linq
 
 let private client () = (new Factory()).CreateClient()
 
@@ -83,3 +84,77 @@ let ``resetting the world resets the clock with it`` () =
     Assert.True after.Running
     Assert.Equal(1.0, after.Rate)
     Assert.True((demoNow after - DemoClock.epoch).Duration() < TimeSpan.FromSeconds 5.0)
+
+// --------------------------------------------------------- Reschedule I/O ----
+
+[<Fact>]
+let ``the reschedule sub-status survives a round trip through the job columns`` () =
+    // The pure function is tested in Shared. This is the other half: that what
+    // the columns give back is what the domain type put in.
+    let db, conn = FixItHere.Backend.Tests.DbTests.makeDb ()
+    use _ = conn
+    FixItHere.Backend.Seed.run db
+    let job = db.Jobs.First(fun j -> j.State = "Scheduled")
+
+    let loaded = FixItHere.Backend.Services.readReschedule job
+    Assert.Equal(DateTimeOffset.Parse job.PromisedStart, loaded.PromisedStart)
+    Assert.True loaded.Pending.IsNone
+
+    let proposal =
+        { ProposedStart = loaded.PromisedStart.AddMinutes 15.0
+          By = ActorRole.Provider
+          Reason = "Traffic on the DVP"
+          ExpiresAt = loaded.PromisedStart }
+    let withPending = FixItHere.Backend.Services.writeReschedule job { loaded with Pending = Some proposal }
+    match (FixItHere.Backend.Services.readReschedule withPending).Pending with
+    | Some back -> Assert.Equal(proposal, back)
+    | None -> failwith "a written proposal did not read back"
+
+    // ...and clearing it really clears every column, rather than leaving a
+    // half-populated proposal the UI would render as live.
+    let cleared = FixItHere.Backend.Services.writeReschedule withPending { loaded with Pending = None }
+    Assert.Equal("", cleared.ProposedStart)
+    Assert.Equal("", cleared.ProposedBy)
+    Assert.Equal("", cleared.ProposalReason)
+    Assert.Equal("", cleared.ProposalExpiresAt)
+    Assert.True (FixItHere.Backend.Services.readReschedule cleared).Pending.IsNone
+
+[<Fact>]
+let ``a job that has already been worked cannot be rescheduled`` () =
+    let db, conn = FixItHere.Backend.Tests.DbTests.makeDb ()
+    use _ = conn
+    FixItHere.Backend.Seed.run db
+    let svc = FixItHere.Backend.Services.JobService(db, FixItHere.Backend.Services.NullBroadcaster())
+    let closed = db.Jobs.First(fun j -> j.State = "Closed")
+    let proposal =
+        { ProposedStart = DemoClock.epoch.AddHours 3.0
+          By = ActorRole.Provider; Reason = "late"
+          ExpiresAt = DemoClock.epoch.AddHours 1.0 }
+    let result = (svc.Reschedule closed.Id DemoClock.epoch (Propose proposal)).Result
+    Assert.True(Result.isError result)
+
+[<Fact>]
+let ``arriving settles a pending proposal`` () =
+    // Found by watching the console rather than by reading code: the scripted
+    // late demo left "Provider proposed 26:23 late" on a job whose work was
+    // already InProgress, because nothing cleared the proposal when the
+    // provider actually turned up.
+    let db, conn = FixItHere.Backend.Tests.DbTests.makeDb ()
+    use _ = conn
+    FixItHere.Backend.Seed.run db
+    let svc = FixItHere.Backend.Services.JobService(db, FixItHere.Backend.Services.NullBroadcaster())
+    let job = db.Jobs.First(fun j -> j.State = "Scheduled")
+    let now = DateTimeOffset.Parse job.PromisedStart |> fun p -> p.AddHours -1.0
+    let proposal =
+        { ProposedStart = DateTimeOffset.Parse(job.PromisedStart).AddMinutes 15.0
+          By = ActorRole.Provider; Reason = "Traffic on the DVP"
+          ExpiresAt = now + Reschedule.proposalWindow }
+    Assert.True((svc.Reschedule job.Id now (Propose proposal)).Result |> Result.isOk)
+    Assert.True(db.Jobs.Single(fun j -> j.Id = job.Id).ProposedStart <> "")
+
+    // En route it still stands — they have not arrived yet.
+    (svc.Apply job.Id DepartEnRoute).Result |> ignore
+    Assert.True(db.Jobs.Single(fun j -> j.Id = job.Id).ProposedStart <> "")
+
+    (svc.Apply job.Id Arrive).Result |> ignore
+    Assert.Equal("", db.Jobs.Single(fun j -> j.Id = job.Id).ProposedStart)

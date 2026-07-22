@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="Geo.fs" />
     <Compile Include="Places.fs" />
     <Compile Include="Actor.fs" />
     <Compile Include="Domain.fs" />
@@ -15,6 +16,7 @@
     <Compile Include="StateMachine.fs" />
     <Compile Include="Dtos.fs" />
     <Compile Include="Format.fs" />
+    <Compile Include="Travel.fs" />
   </ItemGroup>
 
 </Project>

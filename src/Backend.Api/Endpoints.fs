@@ -16,14 +16,7 @@ let private okJson (data: 't) = Results.Json(Envelope.ok data)
 let private err (status: int) (msg: string) =
     Results.Json(Envelope.fail msg, statusCode = status)
 
-let private haversineKm (lat1, lng1) (lat2, lng2) =
-    let rad d = d * Math.PI / 180.0
-    let dLat = rad (lat2 - lat1)
-    let dLng = rad (lng2 - lng1)
-    let a =
-        sin (dLat / 2.0) ** 2.0
-        + cos (rad lat1) * cos (rad lat2) * sin (dLng / 2.0) ** 2.0
-    6371.0 * 2.0 * atan2 (sqrt a) (sqrt (1.0 - a))
+let private haversineKm = Geo.distanceKm
 
 let private toProviderDto (db: AppDb) (p: Provider) : ProviderDto =
     let svcName = db.Services.Single(fun s -> s.Id = p.ServiceId).Name

@@ -5,6 +5,7 @@ open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.ClientShared
 open FixItHere.Customer
+open FixItHere.Shared
 
 let private statusLine (state: string) =
     match state with
@@ -22,8 +23,10 @@ let view (model: Model) (jobId: int) =
         let etaLine =
             match model.ProviderPositions.TryFind job.ProviderId with
             | Some pos ->
-                let km = Geo.distanceKm pos (job.Lat, job.Lng)
-                sprintf "%.1f km away — ETA ~%d min" km (max 1 (int (km / 40.0 * 60.0)))
+                // Demo minutes, from Shared. Computed inline here as *real*
+                // minutes, this was the number that contradicted the countdown
+                // beside it the moment the clock ran faster than 1x.
+                Travel.describe (Geo.distanceKm pos (job.Lat, job.Lng))
             | None -> "Locating provider…"
         AnyView(
             (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto ]) {

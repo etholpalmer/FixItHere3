@@ -243,3 +243,45 @@ let ``a resolved slot describes itself in human terms`` () =
     Assert.StartsWith("Today, ", BookingSlot.describe today DemoClock.epoch)
     Assert.StartsWith("Tomorrow, ", BookingSlot.describe (DemoClock.epoch.AddDays 1.0) DemoClock.epoch)
     Assert.StartsWith("Saturday, ", BookingSlot.describe (DemoClock.epoch.AddDays 2.0) DemoClock.epoch)
+
+// ---------------------------------------------------------------- Travel ----
+
+[<Fact>]
+let ``ETA is never zero for a provider still moving`` () =
+    // "ETA 0 min" beside a car visibly crossing the map reads as a broken
+    // readout, not as an imminent arrival.
+    Assert.Equal(Travel.minMinutes, Travel.minutesFor 0.0)
+    Assert.Equal(Travel.minMinutes, Travel.minutesFor -5.0)
+    Assert.Equal(Travel.minMinutes, Travel.minutesFor nan)
+    // The case that matters, and the one an earlier version of this test
+    // missed: a provider five metres away is *almost* there, which is exactly
+    // when the raw formula produces a fraction of a minute and the screen
+    // rounds it to zero.
+    Assert.Equal(Travel.minMinutes, Travel.minutesFor 0.005)
+    Assert.Equal(Travel.minMinutes, Travel.minutesFor 0.4)
+
+[<Property>]
+let ``ETA grows with distance and stays finite`` (a: int) (b: int) =
+    let near = float (abs a % 40)
+    let far = near + 1.0 + float (abs b % 40)
+    let etaNear = Travel.minutesFor near
+    let etaFar = Travel.minutesFor far
+    etaFar >= etaNear && not (Double.IsNaN etaFar) && not (Double.IsInfinity etaFar)
+
+[<Fact>]
+let ``depart-by is the promise less the travel time`` () =
+    let promised = DemoClock.epoch.AddHours 2.0
+    let km = 16.0
+    Assert.Equal(promised - Travel.durationFor km, Travel.departBy promised km)
+    // Far enough away and you should already have left.
+    Assert.True(Travel.departBy promised 400.0 < DemoClock.epoch.AddHours 1.0)
+
+[<Fact>]
+let ``the two haversine implementations are now one`` () =
+    // They were separate copies — Shared for the backend, ClientShared for the
+    // apps — until ETA became a contract both sides had to agree on.
+    let a = 43.6650, -79.4103   // The Annex
+    let b = 43.7757, -79.2578   // Scarborough Centre
+    let d = Geo.distanceKm a b
+    Assert.InRange(d, 17.0, 20.0)
+    Assert.Equal(0.0, Geo.distanceKm a a)

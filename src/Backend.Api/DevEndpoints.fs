@@ -7,80 +7,158 @@ open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Hosting
 open FixItHere.Shared
 open FixItHere.Shared.Dtos
 open FixItHere.Backend.Db
 open FixItHere.Backend.Services
 
 [<CLIMutable>]
-type StartDemoRequest = { CustomerId: int; ProviderId: int }
+type StartDemoRequest =
+    { CustomerId: int; ProviderId: int
+      /// Run the running-late beat: the provider proposes a new arrival and
+      /// the customer answers it live. This is the scene the pitch turns on.
+      Late: bool }
 
 let private okJson (data: 't) = Results.Json(Envelope.ok data)
 let private err code (msg: string) = Results.Json(Envelope.fail msg, statusCode = code)
 
-/// Scripted demo timeline. Runs on a background task with its own DI scope.
-let private runTimeline (sp: IServiceProvider) (jobId: int) =
+/// Scripted demo timeline.
+///
+/// `late = true` runs the beat the whole plan is built around: the provider
+/// hits traffic, proposes a new arrival, and the customer's phone lights up
+/// while the audience watches.
+let private runTimeline (sp: IServiceProvider) (jobId: int) (late: bool) =
     task {
         use scope = sp.CreateScope()
         let db = scope.ServiceProvider.GetRequiredService<AppDb>()
         let hub = scope.ServiceProvider.GetRequiredService<IBroadcaster>()
+        let clock = sp.GetRequiredService<Clock.DemoClockService>()
+        let lifetime = sp.GetRequiredService<IHostApplicationLifetime>()
+        let ct = lifetime.ApplicationStopping
         let svc = JobService(db, hub)
-        let pause () = Task.Delay 2000
         let apply ev = task { let! _ = svc.Apply jobId ev in () }
+
+        /// Wait for demo time to advance, not for real time to pass.
+        ///
+        /// This is what keeps the map honest against the countdown. A fixed
+        /// `Task.Delay 2000` paces the car in real seconds while every deadline
+        /// on both phones is measured in demo minutes, so at 60x the countdown
+        /// sprints to zero while the provider crawls.
+        ///
+        /// Polling rather than computing one delay is deliberate: the operator
+        /// can pause, change rate or jump *during* a step, and a precomputed
+        /// delay would ignore all three. Pausing the clock pauses the demo;
+        /// jumping forward completes the current step at once, which is exactly
+        /// what "skip ahead" should feel like.
+        let waitDemo (span: TimeSpan) =
+            task {
+                let until = clock.Now() + span
+                // 100 ms is below the clients' 250 ms repaint, so the car never
+                // lags the countdown by a frame anyone can see.
+                while clock.Now() < until && not ct.IsCancellationRequested do
+                    do! Task.Delay(100, ct)
+            }
+
         // Hoisted: every notification below is job-scoped, so both parties are
         // needed from the first beat, not just at the interpolation step.
         let job = db.Jobs.AsNoTracking().Single(fun j -> j.Id = jobId)
+        let prov = db.Providers.AsNoTracking().Single(fun p -> p.Id = job.ProviderId)
 
-        do! pause ()
+        /// Real chat, persisted through the same table the apps read.
+        ///
+        /// This used to broadcast `MessageDto`s with `Id = 0` that were never
+        /// written: the second was deduped away, both vanished on navigation,
+        /// and the customer-role one rendered in the *customer's own app* as
+        /// "You: Hi!" — words they never typed. Only the provider speaks in the
+        /// script now, because a scripted message attributed to the person
+        /// holding the phone is the loudest possible tell.
+        let say (text: string) =
+            task {
+                let msg =
+                    { Id = 0; JobId = jobId
+                      SenderId = job.ProviderId; SenderRole = "Provider"
+                      Text = text; PhotoBase64 = null
+                      SentAt = (clock.Now()).ToString "o"; Seen = false }
+                db.Messages.Add msg |> ignore
+                db.SaveChanges() |> ignore
+                let saved = db.Messages.OrderByDescending(fun m -> m.Id).First()
+                do! hub.MessageReceived
+                        ({ Id = saved.Id; JobId = saved.JobId
+                           SenderId = saved.SenderId; SenderRole = saved.SenderRole
+                           SenderName = prov.BusinessName
+                           Text = saved.Text; PhotoBase64 = saved.PhotoBase64
+                           SentAt = saved.SentAt; Seen = saved.Seen },
+                         job.CustomerId, job.ProviderId)
+            }
+
+        let moveTo (lat: float) (lng: float) =
+            task {
+                let tracked = db.Providers.Single(fun p -> p.Id = job.ProviderId)
+                db.Entry(tracked).CurrentValues.SetValues({ tracked with Lat = lat; Lng = lng })
+                db.SaveChanges() |> ignore
+                do! hub.LocationUpdated
+                        { ProviderId = job.ProviderId; Lat = lat; Lng = lng
+                          UpdatedAt = (clock.Now()).ToString "o" }
+            }
+
+        let startLat, startLng = prov.Lat, prov.Lng
+        let km = Geo.distanceKm (startLat, startLng) (job.Lat, job.Lng)
+        // The journey takes as long as the ETA says it takes. Any other number
+        // here is the contradiction this task exists to remove.
+        let journey = Travel.durationFor km
+        let steps = 12
+
+        do! waitDemo (TimeSpan.FromMinutes 1.0)
         do! hub.NotifyJob ("Provider Accepted", job.CustomerId, job.ProviderId)
         do! apply Accepted
-        do! pause ()
+
+        if late then
+            // The hook. Propose a later arrival before departing, so the
+            // customer's phone lights up while nothing else is happening on
+            // screen and the request is unmistakably the event.
+            do! waitDemo (TimeSpan.FromMinutes 1.0)
+            do! say "Sorry — stuck behind a closure on the DVP. Can I push us back 15?"
+            let now = clock.Now()
+            let current = Services.readReschedule job
+            let proposal =
+                { ProposedStart = current.PromisedStart.AddMinutes 15.0
+                  By = ActorRole.Provider
+                  Reason = "Traffic on the DVP"
+                  ExpiresAt = now + Reschedule.proposalWindow }
+            match! svc.Reschedule jobId now (Propose proposal) with
+            | Ok _ -> do! hub.NotifyJob ("Provider is running late", job.CustomerId, job.ProviderId)
+            | Error e -> do! hub.NotifyJob (sprintf "Could not propose a new time: %s" e,
+                                            job.CustomerId, job.ProviderId)
+            // Left pending on purpose. The customer answers it — that is the
+            // beat. If nobody does, task 9's expiry sweep lapses it.
+            do! waitDemo Reschedule.proposalWindow
+
+        do! waitDemo (TimeSpan.FromMinutes 1.0)
         do! apply DepartEnRoute
-        // interpolate provider toward the job location in 5 steps
-        let prov = db.Providers.Single(fun p -> p.Id = job.ProviderId)
-        let startLat, startLng = prov.Lat, prov.Lng
-        for i in 1 .. 5 do
-            do! pause ()
-            let t = float i / 5.0
-            let lat = startLat + (job.Lat - startLat) * t
-            let lng = startLng + (job.Lng - startLng) * t
-            let tracked = db.Providers.Single(fun p -> p.Id = job.ProviderId)
-            db.Entry(tracked).CurrentValues.SetValues({ tracked with Lat = lat; Lng = lng })
-            db.SaveChanges() |> ignore
-            do! hub.LocationUpdated
-                    { ProviderId = prov.Id; Lat = lat; Lng = lng
-                      UpdatedAt = FixItHere.Backend.Seed.nowIso () }
-            if i = 2 then
-                do! hub.MessageReceived
-                        ({ Id = 0; JobId = jobId; SenderId = job.CustomerId
-                           SenderRole = "Customer"; SenderName = "Customer"
-                           Text = "Hi!"; PhotoBase64 = null
-                           SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false },
-                         job.CustomerId, job.ProviderId)
-            if i = 3 then
-                do! hub.MessageReceived
-                        ({ Id = 0; JobId = jobId; SenderId = job.ProviderId
-                           SenderRole = "Provider"; SenderName = "Provider"
-                           Text = "On my way."; PhotoBase64 = null
-                           SentAt = FixItHere.Backend.Seed.nowIso (); Seen = false },
-                         job.CustomerId, job.ProviderId)
-        do! pause ()
+
+        for i in 1 .. steps do
+            do! waitDemo (journey / float steps)
+            let t = float i / float steps
+            do! moveTo (startLat + (job.Lat - startLat) * t) (startLng + (job.Lng - startLng) * t)
+            if i = 4 then do! say "On my way — should be about ten minutes."
+
         do! hub.NotifyJob ("Provider Arriving", job.CustomerId, job.ProviderId)
         do! apply Arrive
-        do! pause ()
+        do! waitDemo (TimeSpan.FromMinutes 2.0)
         do! apply StartWork
-        do! pause ()
+        do! waitDemo (TimeSpan.FromMinutes 45.0)
         do! apply CompleteWork
-        do! pause ()
+        do! waitDemo (TimeSpan.FromMinutes 1.0)
         do! hub.NotifyJob ("Payment Complete", job.CustomerId, job.ProviderId)
-        db.Ratings.Add
-            { Id = 0; JobId = jobId
-              RaterId = job.CustomerId; RaterRole = "Customer"
-              RateeId = job.ProviderId; RateeRole = "Provider"
-              Stars = 5; Comment = "Great demo!"
-              CreatedAt = Seed.nowIso () } |> ignore
-        db.SaveChanges() |> ignore
-        do! apply RateAndClose
+        // Stops here, deliberately.
+        //
+        // The script used to write its own 5-star "Great demo!" review *and*
+        // apply RateAndClose while the customer app was already sitting on its
+        // Rating screen — so the rating the audience typed went nowhere, and
+        // "Great demo!" appeared in the provider's public feedback. Handing
+        // control back at payment is also the better moment to hand it back:
+        // it is exactly when someone wants to try the app themselves.
     } :> Task
 
 let mapAll (app: WebApplication) =
@@ -126,5 +204,5 @@ let mapAll (app: WebApplication) =
                           ScheduleChoice = "Now"; Lat = cust.Lat; Lng = cust.Lng
                           Address = cust.Address }
                         (clock.Now() + BookingSlot.asapLead)
-                runTimeline sp dto.Id |> ignore   // fire-and-forget scripted timeline
+                runTimeline sp dto.Id req.Late |> ignore   // fire-and-forget scripted timeline
                 return okJson dto })) |> ignore
