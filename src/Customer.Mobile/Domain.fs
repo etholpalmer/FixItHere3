@@ -1,5 +1,6 @@
 namespace FixItHere.Customer
 
+open System
 open System.Threading.Tasks
 open FixItHere.Shared
 open FixItHere.Shared.Dtos
@@ -73,7 +74,20 @@ type Model =
       LoginEmail: string
       LoginPassword: string
       SigningIn: bool
-      Toast: string option
+      /// A queue, not a slot. A single `Toast: string option` meant the
+      /// second notification silently replaced the first — so the two-sided
+      /// moments this phase is built around could overwrite each other
+      /// mid-demo with nothing left to show it happened.
+      Notices: Notice list
+      NextNoticeId: int
+      /// The demo clock, mirrored as the server's affine *map* rather than as
+      /// a time. `DemoNow` is recomputed from it on every tick, which is why
+      /// no countdown and no notice expiry in this app owns a timer.
+      Clock: DemoClock option
+      DemoNow: DateTimeOffset
+      /// Guards the tick loop against being started twice — the same
+      /// re-entrancy shape as GpsLoopActive.
+      TickActive: bool
       Error: string option }
 
 module Model =
@@ -87,7 +101,9 @@ module Model =
           ChatDrafts = Map.empty; TypingToken = 0; ProviderTyping = false; SeenUpToMessageId = None; TypingCooldown = false
           RatingStars = 5; RatingComment = ""
           LoginEmail = "john.reyes@gmail.com"; LoginPassword = "Customer1!"; SigningIn = false
-          Toast = None; Error = None }
+          Notices = []; NextNoticeId = 1
+          Clock = None; DemoNow = DemoClock.epoch; TickActive = false
+          Error = None }
 
 type Msg =
     | SplashDone
@@ -136,7 +152,13 @@ type Msg =
     /// No longer reachable from the UI. The /dev console has its own Start Demo,
     /// but it POSTs /dev/demo/start directly rather than dispatching this.
     | StartDemo
-    | DismissToast
+    | DismissNotice of int
+    /// One tick, every 250 ms of real time. Recomputes DemoNow from the clock
+    /// map and prunes expired notices. 250 rather than 1000 because at 60x a
+    /// one-second tick advances demo time a full minute and every countdown
+    /// visibly skips.
+    | DemoTick
+    | ClockSynced of DemoClockDto
     | DismissError
     | ApiError of string
 
@@ -156,6 +178,10 @@ type ApiDeps =
       // MAUI-implemented effects, injected like the HTTP calls so update stays pure:
       PickPhoto: unit -> Task<Result<string, string>>          // base64 jpeg/png ≤ ~100KB
       GetGpsLocation: unit -> Task<Result<float * float, string>>
+      /// Startup and reconnect resync. A client that missed a ClockUpdated
+      /// while disconnected cannot rebuild the map from ticks it never got —
+      /// it has to ask.
+      GetClock: unit -> Task<Result<DemoClockDto, string>>
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 

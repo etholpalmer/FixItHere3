@@ -13,6 +13,7 @@
     <Compile Include="JobStatus.fs" />
     <Compile Include="DemoTime.fs" />
     <Compile Include="Reschedule.fs" />
+    <Compile Include="Notify.fs" />
     <Compile Include="BookingSlot.fs" />
     <Compile Include="StateMachine.fs" />
     <Compile Include="Dtos.fs" />

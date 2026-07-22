@@ -1,7 +1,9 @@
 module FixItHere.Provider.Tests.UpdateTests
 
 open System.Threading.Tasks
+open System
 open Xunit
+open FixItHere.Shared
 open FixItHere.Shared.Dtos
 open FixItHere.Provider
 
@@ -66,10 +68,15 @@ let stubDeps : ProviderApiDeps =
       StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.70, -79.45))
+      GetClock = fun () -> Task.FromResult(Ok ({ DemoNow = ""; AnchorDemo = ""; AnchorReal = ""
+                                                 Rate = 1.0; Running = true } : DemoClockDto))
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 
 let up msg model = Update.update stubDeps msg model |> fst
+/// Same as `up`, argument order flipped for piping a model through several
+/// messages — which is how the notice queue has to be exercised at all.
+let up' msg model = up msg model
 
 [<Fact>]
 let ``login lands Home with session`` () =
@@ -368,3 +375,35 @@ let ``a second Depart does not start a second GPS loop`` () =
     Assert.True(m1.GpsLoopActive)
     let m2 = up (JobActioned enroute) m1
     Assert.True(m2.GpsLoopActive)   // still exactly one loop; guard prevents a second
+
+[<Fact>]
+let ``the demo tick pump starts once, however many clock syncs arrive`` () =
+    // This assertion has to look at the *Cmd*, not the model. The `up` helper
+    // discards it, and the guard lives entirely in whether a second
+    // `delayCmd tickMs DemoTick` is emitted — this repo has already shipped a
+    // guard with zero real coverage for exactly that reason.
+    //
+    // Without the guard every ClockUpdated push adds another pump, and each one
+    // dispatches DemoTick forever: countdowns would update at 4 Hz, then 8, then
+    // 12, for the rest of the session.
+    let dto : DemoClockDto =
+        { DemoNow = ""; AnchorDemo = DemoClock.epoch.ToString "o"
+          AnchorReal = DateTimeOffset.UtcNow.ToString "o"; Rate = 1.0; Running = true }
+    let m1, cmd1 = Update.update stubDeps (ClockSynced dto) Model.initial
+    Assert.True m1.TickActive
+    Assert.False(List.isEmpty cmd1)          // the first sync starts the pump
+
+    let _, cmd2 = Update.update stubDeps (ClockSynced dto) m1
+    Assert.True(List.isEmpty cmd2)           // every later sync must not
+
+[<Fact>]
+let ``a malformed clock leaves the last known map in place`` () =
+    // A broken countdown is cosmetic; a crash on the tracking screen ends the
+    // demo. Anchors that will not parse must be ignored, not adopted.
+    let bad : DemoClockDto =
+        { DemoNow = ""; AnchorDemo = "not a time"; AnchorReal = "also not"
+          Rate = 1.0; Running = true }
+    let m, cmd = Update.update stubDeps (ClockSynced bad) Model.initial
+    Assert.True m.Clock.IsNone
+    Assert.False m.TickActive
+    Assert.True(List.isEmpty cmd)

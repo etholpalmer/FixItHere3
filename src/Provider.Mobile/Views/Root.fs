@@ -3,6 +3,16 @@ module FixItHere.Provider.Views.Root
 open Fabulous.Maui
 open type Fabulous.Maui.View
 open FixItHere.Provider
+open FixItHere.Shared
+
+/// Colour carries the kind. Every notification used to render in the same grey
+/// bar, so "Your provider never arrived" and "Provider Accepted" looked alike.
+let private noticeColor (k: NoticeKind) =
+    match k with
+    | NoticeKind.Success -> Microsoft.Maui.Graphics.Color.FromRgb(0x1B, 0x5E, 0x3A)
+    | NoticeKind.Warning -> Microsoft.Maui.Graphics.Color.FromRgb(0x8A, 0x4B, 0x08)
+    | NoticeKind.Ask -> Microsoft.Maui.Graphics.Color.FromRgb(0x1E, 0x3A, 0x8A)
+    | NoticeKind.Info -> Microsoft.Maui.Graphics.Color.FromRgb(0x33, 0x33, 0x3D)
 
 let private screenView (model: Model) =
     match model.Screen with
@@ -20,15 +30,17 @@ let view (model: Model) =
         ContentPage(
             (Grid(coldefs = [ Star ], rowdefs = [ Star ]) {
                 screenView model
-                match model.Toast with
-                | Some t ->
-                    Label(t)
-                        .background(Microsoft.Maui.Graphics.Colors.DarkSlateBlue)
-                        .textColor(Microsoft.Maui.Graphics.Colors.White)
-                        .padding(12.)
-                        .verticalOptions(Microsoft.Maui.Controls.LayoutOptions.Start)
-                        .gestureRecognizers() { TapGestureRecognizer(DismissToast) }
-                | None -> ()
+                // The stack, newest first. A single slot silently replaced
+                // whatever was there — so the two-sided beats this phase exists
+                // to show could overwrite each other mid-demo.
+                (VStack(spacing = 4.) {
+                    for n in model.Notices do
+                        Label(n.Text)
+                            .background(noticeColor n.Kind)
+                            .textColor(Microsoft.Maui.Graphics.Colors.White)
+                            .padding(12.)
+                            .gestureRecognizers() { TapGestureRecognizer(DismissNotice n.Id) }
+                }).verticalOptions(Microsoft.Maui.Controls.LayoutOptions.Start)
                 match model.Error with
                 | Some e ->
                     Label(sprintf "⚠ %s" e)

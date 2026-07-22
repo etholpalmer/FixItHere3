@@ -1,7 +1,9 @@
 module FixItHere.Provider.Update
 
+open System
 open System.Threading.Tasks
 open Fabulous
+open FixItHere.Shared
 open FixItHere.Shared.Dtos
 open FixItHere.Provider
 
@@ -17,6 +19,31 @@ let apiCmd (work: unit -> Task<Result<'a, string>>) (ok: 'a -> Msg) : Cmd<Msg> =
 let delayCmd (ms: int) (msg: Msg) : Cmd<Msg> =
     Cmd.ofTaskMsg (task { do! Task.Delay ms
                           return msg })
+
+/// 250 ms, not 1000. At 60x a one-second tick advances demo time a full
+/// minute, and every countdown on screen visibly skips.
+let tickMs = 250
+
+/// Queue a notice. Kind and job scope come from the caller because only the
+/// caller knows what the message is about.
+let private notify kind jobId text (m: Model) =
+    { m with
+        Notices = Notify.push (Notify.create m.NextNoticeId kind jobId m.DemoNow text) m.Notices
+        NextNoticeId = m.NextNoticeId + 1 }
+
+
+/// Turn the wire DTO into the affine map. A malformed clock leaves the app on
+/// its last known map rather than throwing: a broken countdown is a cosmetic
+/// failure, a crash on the tracking screen ends the demo.
+let private clockOfDto (d: DemoClockDto) =
+    let parse (s: string) =
+        match DateTimeOffset.TryParse(s, Globalization.CultureInfo.InvariantCulture,
+                                      Globalization.DateTimeStyles.RoundtripKind) with
+        | true, v -> Some v
+        | _ -> None
+    match parse d.AnchorDemo, parse d.AnchorReal with
+    | Some ad, Some ar -> Some { AnchorDemo = ad; AnchorReal = ar; Rate = d.Rate; Running = d.Running }
+    | _ -> None
 
 let init () = Model.initial, delayCmd 1500 SplashDone
 
@@ -37,6 +64,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         Nav.resetTo Home { model with Session = Some session },
         Cmd.batch
             [ apiCmd (fun () -> deps.GetMyJobs resp.UserId) JobsLoaded
+              apiCmd deps.GetClock ClockSynced
               // Online lives on the server (the seed marks providers online), so
               // hydrate it instead of assuming the local default of false — which
               // otherwise hid the available-jobs list until "Go Online" was pressed.
@@ -65,7 +93,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | ProviderHydrated dto -> { model with Online = dto.Online }, Cmd.none
     | OnlineChanged dto ->
         { model with Online = dto.Online
-                     Toast = Some (if dto.Online then "You are Online" else "You are Offline") },
+                     Notices = model.Notices },
         Cmd.none
     | JobsLoaded xs -> { model with Jobs = xs }, Cmd.none
     | AcceptJob id -> model, apiCmd (fun () -> deps.Accept id) JobActioned
@@ -92,7 +120,29 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         | _ -> m, Cmd.none
     | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
-    | DismissToast -> { model with Toast = None }, Cmd.none
+    | ClockSynced dto ->
+        match clockOfDto dto with
+        | None -> model, Cmd.none
+        | Some c ->
+        // Adopt the map and take one tick immediately, so the first frame
+        // after sign-in shows real demo time rather than the epoch.
+        let m = { model with Clock = Some c; DemoNow = DemoClock.nowAt c DateTimeOffset.UtcNow }
+        // Guarded: ClockSynced fires on sign-in *and* on every ClockUpdated
+        // push, and starting a second pump would double every countdown's
+        // update rate for the rest of the session.
+        if m.TickActive then (m, Cmd.none)
+        else ({ m with TickActive = true }, delayCmd tickMs DemoTick)
+    | DemoTick ->
+        // The single pump. Everything time-dependent in this app is a pure
+        // function of DemoNow, so there is exactly one repeating timer in the
+        // process and a moved deadline can never strand a stale callback.
+        let now =
+            match model.Clock with
+            | Some c -> DemoClock.nowAt c DateTimeOffset.UtcNow
+            | None -> model.DemoNow
+        { model with DemoNow = now; Notices = Notify.prune now model.Notices },
+        delayCmd tickMs DemoTick
+    | DismissNotice id -> { model with Notices = Notify.dismiss id model.Notices }, Cmd.none
     | GpsTick jobId ->
         // stream own position while the job is EnRoute and Real GPS is on
         match activeJob model, model.Session with
@@ -194,9 +244,13 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             match model.Session with
             | Some s -> apiCmd (fun () -> deps.GetMyJobs s.UserId) JobsLoaded
             | None -> Cmd.none
+        let thanked = notify NoticeKind.Success None "Thanks!" model
         Nav.resetTo Home
-            { model with Toast = Some "Thanks!"; PaymentResult = None
-                         RatingStars = 5; RatingComment = ""; SliderStart = None },
+            { thanked with
+                PaymentResult = None
+                RatingStars = 5
+                RatingComment = ""
+                SliderStart = None },
         refresh
     | StartFakeCall -> { model with FakeCallActive = true }, delayCmd 10000 EndFakeCall
     | EndFakeCall -> { model with FakeCallActive = false }, Cmd.none
@@ -212,7 +266,7 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         | Some s -> model, apiCmd (fun () -> deps.StartDemo 1 s.UserId) DemoStarted   // customer 1 = John (seed order)
         | None -> model, Cmd.ofMsg (ApiError "Not logged in")
     | DemoStarted job ->
-        { model with Toast = Some (sprintf "Demo started (job #%d)" job.Id) }, Cmd.none
+        notify NoticeKind.Info (Some job.Id) (sprintf "Demo started (job #%d)" job.Id) model, Cmd.none
     | HubJobUpdated job ->
         let jobs =
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)
@@ -246,7 +300,10 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
         match model.Session with
         | Some s when s.UserId = dto.Id -> { model with Online = dto.Online }, Cmd.none
         | _ -> model, Cmd.none
-    | HubNotification text -> { model with Toast = Some text }, Cmd.none
+    | HubNotification text ->
+        // Classified rather than dumped into one grey bar: a no-show and an
+        // acceptance should not look identical.
+        notify (Notify.classify text) None text model, Cmd.none
     | HubTyping (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->

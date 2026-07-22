@@ -1,7 +1,9 @@
 module FixItHere.Customer.Update
 
+open System
 open System.Threading.Tasks
 open Fabulous
+open FixItHere.Shared
 open FixItHere.Shared.Dtos
 open FixItHere.Customer
 
@@ -20,6 +22,31 @@ let delayCmd (ms: int) (msg: Msg) : Cmd<Msg> =
         do! Task.Delay ms
         return msg
     })
+
+/// 250 ms, not 1000. At 60x a one-second tick advances demo time a full
+/// minute, and every countdown on screen visibly skips.
+let tickMs = 250
+
+/// Queue a notice. Kind and job scope come from the caller because only the
+/// caller knows what the message is about.
+let private notify kind jobId text (m: Model) =
+    { m with
+        Notices = Notify.push (Notify.create m.NextNoticeId kind jobId m.DemoNow text) m.Notices
+        NextNoticeId = m.NextNoticeId + 1 }
+
+
+/// Turn the wire DTO into the affine map. A malformed clock leaves the app on
+/// its last known map rather than throwing: a broken countdown is a cosmetic
+/// failure, a crash on the tracking screen ends the demo.
+let private clockOfDto (d: DemoClockDto) =
+    let parse (s: string) =
+        match DateTimeOffset.TryParse(s, Globalization.CultureInfo.InvariantCulture,
+                                      Globalization.DateTimeStyles.RoundtripKind) with
+        | true, v -> Some v
+        | _ -> None
+    match parse d.AnchorDemo, parse d.AnchorReal with
+    | Some ad, Some ar -> Some { AnchorDemo = ad; AnchorReal = ar; Rate = d.Rate; Running = d.Running }
+    | _ -> None
 
 let init () = Model.initial, delayCmd 1500 SplashDone
 
@@ -40,6 +67,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         Nav.resetTo Home { model with Session = Some session },
         Cmd.batch
             [ apiCmd (fun () -> deps.GetJobs resp.UserId) JobsLoaded
+              apiCmd deps.GetClock ClockSynced
               apiCmd deps.GetServices ServicesLoaded ]
     | Navigate target ->
         let m = Nav.push model target
@@ -79,7 +107,29 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         Nav.push m (Tracking job.Id), Cmd.none
     | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
-    | DismissToast -> { model with Toast = None }, Cmd.none
+    | ClockSynced dto ->
+        match clockOfDto dto with
+        | None -> model, Cmd.none
+        | Some c ->
+        // Adopt the map and take one tick immediately, so the first frame
+        // after sign-in shows real demo time rather than the epoch.
+        let m = { model with Clock = Some c; DemoNow = DemoClock.nowAt c DateTimeOffset.UtcNow }
+        // Guarded: ClockSynced fires on sign-in *and* on every ClockUpdated
+        // push, and starting a second pump would double every countdown's
+        // update rate for the rest of the session.
+        if m.TickActive then (m, Cmd.none)
+        else ({ m with TickActive = true }, delayCmd tickMs DemoTick)
+    | DemoTick ->
+        // The single pump. Everything time-dependent in this app is a pure
+        // function of DemoNow, so there is exactly one repeating timer in the
+        // process and a moved deadline can never strand a stale callback.
+        let now =
+            match model.Clock with
+            | Some c -> DemoClock.nowAt c DateTimeOffset.UtcNow
+            | None -> model.DemoNow
+        { model with DemoNow = now; Notices = Notify.prune now model.Notices },
+        delayCmd tickMs DemoTick
+    | DismissNotice id -> { model with Notices = Notify.dismiss id model.Notices }, Cmd.none
     | CancelActiveJob jobId ->
         model, apiCmd (fun () -> deps.CancelJob jobId) HubJobUpdated
     | MessagesLoaded xs ->
@@ -149,9 +199,12 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             match model.Session with
             | Some s -> apiCmd (fun () -> deps.GetJobs s.UserId) JobsLoaded
             | None -> Cmd.none
+        let thanked = notify NoticeKind.Success None "Thanks for your rating!" model
         Nav.resetTo Home
-            { model with Toast = Some "Thanks for your rating!"; PaymentResult = None
-                         RatingStars = 5; RatingComment = "" },
+            { thanked with
+                PaymentResult = None
+                RatingStars = 5
+                RatingComment = "" },
         refresh
     | StartFakeCall -> { model with FakeCallActive = true }, delayCmd 10000 EndFakeCall
     | EndFakeCall -> { model with FakeCallActive = false }, Cmd.none
@@ -211,7 +264,10 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             then model.Providers |> List.map (fun p -> if p.Id = dto.Id then dto else p)
             else model.Providers
         { model with Providers = providers }, Cmd.none
-    | HubNotification text -> { model with Toast = Some text }, Cmd.none
+    | HubNotification text ->
+        // Classified rather than dumped into one grey bar: a no-show and an
+        // acceptance should not look identical.
+        notify (Notify.classify text) None text model, Cmd.none
     | HubTyping (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->

@@ -1,9 +1,11 @@
 module FixItHere.Customer.Tests.UpdateTests
 
 open System.Threading.Tasks
+open System
 open Xunit
 open FixItHere.ClientShared
 open FixItHere.Customer
+open FixItHere.Shared
 open FixItHere.Shared.Dtos
 
 /// A receipt fixture built through the real `Money.breakdown`, so a change to
@@ -60,6 +62,8 @@ let stubDeps : ApiDeps =
       StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.65, -79.38))
+      GetClock = fun () -> Task.FromResult(Ok ({ DemoNow = ""; AnchorDemo = ""; AnchorReal = ""
+                                                 Rate = 1.0; Running = true } : DemoClockDto))
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 
@@ -74,6 +78,9 @@ let mkJob id state : JobDto =
       Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
 let up msg model = Update.update stubDeps msg model |> fst
+/// Same as `up`, argument order flipped for piping a model through several
+/// messages — which is how the notice queue has to be exercised at all.
+let up' msg model = up msg model
 
 [<Fact>]
 let ``splash advances to Login`` () =
@@ -146,8 +153,30 @@ let ``hub location updates position map only`` () =
     Assert.Equal((43.7, -79.4), m.ProviderPositions.[2])
 
 [<Fact>]
-let ``hub notification sets toast`` () =
-    Assert.Equal(Some "Provider Accepted", (up (HubNotification "Provider Accepted") Model.initial).Toast)
+let ``hub notifications queue instead of replacing each other`` () =
+    // The old model held one `Toast: string option`, so a second notification
+    // silently discarded the first — and the two-sided beats this phase is
+    // built around arrive in pairs.
+    let m =
+        Model.initial
+        |> up' (HubNotification "Provider Accepted")
+        |> up' (HubNotification "Provider is running late")
+    Assert.Equal(2, List.length m.Notices)
+    Assert.Equal("Provider is running late", (List.head m.Notices).Text)
+    // ...and they are classified, not all rendered the same.
+    Assert.Equal(NoticeKind.Warning, (List.head m.Notices).Kind)
+    Assert.Equal(NoticeKind.Success, (List.item 1 m.Notices).Kind)
+
+[<Fact>]
+let ``a notice expires on demo time, and the tick is what expires it`` () =
+    // Expiry in demo time means pausing the clock to talk over a beat also
+    // pauses dismissal — impossible if this were a real-time timer.
+    let m0 = up' (HubNotification "Provider Accepted") Model.initial
+    Assert.Single m0.Notices |> ignore
+    let stillFresh = up' DemoTick { m0 with Clock = None; DemoNow = m0.DemoNow }
+    Assert.Single stillFresh.Notices |> ignore
+    let later = { m0 with DemoNow = m0.DemoNow + Notify.lifetime + TimeSpan.FromSeconds 1.0 }
+    Assert.Empty (up' DemoTick later).Notices
 
 [<Fact>]
 let ``payment result stored`` () =
@@ -162,7 +191,7 @@ let ``rating submitted resets to Home and clears payment`` () =
     Assert.Equal(Home, m.Screen)
     Assert.Empty(m.History)
     Assert.Equal(None, m.PaymentResult)
-    Assert.True(m.Toast.IsSome)
+    Assert.False(List.isEmpty m.Notices)
 
 [<Fact>]
 let ``fake call toggles`` () =
@@ -329,3 +358,35 @@ let ``hub provider update refreshes the cached provider list`` () =
     let m0 = { Model.initial with Providers = [p0] }
     let m1 = up (HubProviderUpdated { p0 with Online = true }) m0
     Assert.True((m1.Providers |> List.head).Online)
+
+[<Fact>]
+let ``the demo tick pump starts once, however many clock syncs arrive`` () =
+    // This assertion has to look at the *Cmd*, not the model. The `up` helper
+    // discards it, and the guard lives entirely in whether a second
+    // `delayCmd tickMs DemoTick` is emitted — this repo has already shipped a
+    // guard with zero real coverage for exactly that reason.
+    //
+    // Without the guard every ClockUpdated push adds another pump, and each one
+    // dispatches DemoTick forever: countdowns would update at 4 Hz, then 8, then
+    // 12, for the rest of the session.
+    let dto : DemoClockDto =
+        { DemoNow = ""; AnchorDemo = DemoClock.epoch.ToString "o"
+          AnchorReal = DateTimeOffset.UtcNow.ToString "o"; Rate = 1.0; Running = true }
+    let m1, cmd1 = Update.update stubDeps (ClockSynced dto) Model.initial
+    Assert.True m1.TickActive
+    Assert.False(List.isEmpty cmd1)          // the first sync starts the pump
+
+    let _, cmd2 = Update.update stubDeps (ClockSynced dto) m1
+    Assert.True(List.isEmpty cmd2)           // every later sync must not
+
+[<Fact>]
+let ``a malformed clock leaves the last known map in place`` () =
+    // A broken countdown is cosmetic; a crash on the tracking screen ends the
+    // demo. Anchors that will not parse must be ignored, not adopted.
+    let bad : DemoClockDto =
+        { DemoNow = ""; AnchorDemo = "not a time"; AnchorReal = "also not"
+          Rate = 1.0; Running = true }
+    let m, cmd = Update.update stubDeps (ClockSynced bad) Model.initial
+    Assert.True m.Clock.IsNone
+    Assert.False m.TickActive
+    Assert.True(List.isEmpty cmd)

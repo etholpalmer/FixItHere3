@@ -32,5 +32,6 @@ let createDepsWith
           Http.postEnv http "/dev/demo/start" {| customerId = customerId; providerId = providerId |}
       PickPhoto = pickPhoto
       GetGpsLocation = gpsLocation
+      GetClock = fun () -> Http.getEnv http "/demo/clock"
       SendTyping = sendTyping
       SendSeen = sendSeen }

@@ -30,12 +30,17 @@ type HubClient(baseUrl: string) =
          onJob: JobDto -> unit, onMessage: MessageDto -> unit,
          onLocation: LocationDto -> unit, onNotification: string -> unit,
          onTyping: int * int * string -> unit, onSeen: int * int * string -> unit,
-         onProvider: ProviderDto -> unit) : Task =
+         onProvider: ProviderDto -> unit,
+         onClock: DemoClockDto -> unit) : Task =
         conn.On<JobDto>("JobUpdated", onJob) |> ignore
         conn.On<MessageDto>("MessageReceived", onMessage) |> ignore
         conn.On<LocationDto>("LocationUpdated", onLocation) |> ignore
         conn.On<string>("Notification", onNotification) |> ignore
         conn.On<ProviderDto>("ProviderUpdated", onProvider) |> ignore
+        // Pushed, not polled. Pausing the clock has to reach both phones
+        // immediately, or the operator pauses to talk and the countdowns keep
+        // running on screen behind them.
+        conn.On<DemoClockDto>("ClockUpdated", onClock) |> ignore
         conn.On<int, int, string>("Typing", fun j s r -> onTyping (j, s, r)) |> ignore
         conn.On<int, int, string>("Seen", fun j s r -> onSeen (j, s, r)) |> ignore
         // F# cannot use .Add here — SignalR's Reconnected is a Func<string,Task>,

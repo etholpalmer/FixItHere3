@@ -333,3 +333,71 @@ let ``only a pending arrival counts down`` () =
     Assert.True(JobStatus.awaitsArrival EnRoute)
     for st in [ Arrived; InProgress; Completed; Closed; Cancelled; ProviderNoShow ] do
         Assert.False(JobStatus.awaitsArrival st, JobStateCodec.ofState st)
+
+// ---------------------------------------------------------------- Notify ----
+
+let private notice id kind text =
+    Notify.create id kind (Some 7) DemoClock.epoch text
+
+[<Fact>]
+let ``the queue keeps several notices instead of replacing one`` () =
+    let q =
+        []
+        |> Notify.push (notice 1 NoticeKind.Info "first")
+        |> Notify.push (notice 2 NoticeKind.Success "second")
+    Assert.Equal(2, List.length q)
+    // Newest first — the order they are read in.
+    Assert.Equal("second", (List.head q).Text)
+
+[<Fact>]
+let ``the stack is bounded, oldest dropped first`` () =
+    let q =
+        [ for i in 1 .. Notify.maxVisible + 3 -> notice i NoticeKind.Info (string i) ]
+        |> List.fold (fun acc n -> Notify.push n acc) []
+    Assert.Equal(Notify.maxVisible, List.length q)
+    Assert.DoesNotContain("1", q |> List.map (fun n -> n.Text))
+
+[<Fact>]
+let ``an unanswered question is never dropped to make room`` () =
+    // Discarding an Ask is a correctness bug, not a display one: the other
+    // party is waiting on an answer that can no longer be given.
+    let q =
+        [ notice 1 NoticeKind.Ask "Provider wants to push back 15 min" ]
+        |> List.append []
+        |> fun start ->
+            [ for i in 2 .. 8 -> notice i NoticeKind.Info (string i) ]
+            |> List.fold (fun acc n -> Notify.push n acc) start
+    Assert.Contains(q, fun n -> n.Kind = NoticeKind.Ask)
+
+[<Fact>]
+let ``pruning is a pure function of demo time, and asks never expire`` () =
+    let q =
+        []
+        |> Notify.push (notice 1 NoticeKind.Info "fades")
+        |> Notify.push (notice 2 NoticeKind.Ask "waits for an answer")
+    Assert.Equal(2, List.length (Notify.prune DemoClock.epoch q))
+    let later = DemoClock.epoch + Notify.lifetime + TimeSpan.FromSeconds 1.0
+    let survivors = Notify.prune later q
+    Assert.Equal(1, List.length survivors)
+    Assert.Equal(NoticeKind.Ask, (List.head survivors).Kind)
+
+[<Fact>]
+let ``clearing a job takes its notices with it`` () =
+    // A job that closes should not leave "your provider is running late" up.
+    let q =
+        []
+        |> Notify.push (Notify.create 1 NoticeKind.Info (Some 7) DemoClock.epoch "about job 7")
+        |> Notify.push (Notify.create 2 NoticeKind.Info (Some 9) DemoClock.epoch "about job 9")
+        |> Notify.push (Notify.create 3 NoticeKind.Info None DemoClock.epoch "about the account")
+    let remaining = Notify.clearJob 7 q
+    Assert.Equal(2, List.length remaining)
+    Assert.DoesNotContain("about job 7", remaining |> List.map (fun n -> n.Text))
+
+[<Fact>]
+let ``classification separates an alarm from an acknowledgement`` () =
+    Assert.Equal(NoticeKind.Warning, Notify.classify "Provider is running late")
+    Assert.Equal(NoticeKind.Warning, Notify.classify "Reported as a no-show")
+    Assert.Equal(NoticeKind.Success, Notify.classify "Provider Accepted")
+    Assert.Equal(NoticeKind.Success, Notify.classify "Payment Complete")
+    // Unrecognised text stays quiet rather than falsely alarming.
+    Assert.Equal(NoticeKind.Info, Notify.classify "Something new happened")
