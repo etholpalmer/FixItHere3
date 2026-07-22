@@ -37,7 +37,10 @@ let view (model: Model) =
             for j in model.Jobs
                      |> List.filter (fun j -> j.State = "Scheduled")
                      |> List.sortBy (fun j -> j.PromisedStart) do
-                Button(sprintf "#%d %s — %s @ %s" j.Id j.ServiceName j.CustomerName j.Address,
+                // Address dropped from the row: on a phone it ran off the
+                // right edge as "…The Be", and a truncated address is worse
+                // than none. It is on the detail screen, one tap away.
+                Button(sprintf "#%d %s — %s" j.Id j.ServiceName j.CustomerName,
                        Navigate (JobDetail j.Id))
                 match countdownFor model j with
                 | Some c ->
