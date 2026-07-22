@@ -88,6 +88,12 @@ type Model =
       /// Guards the tick loop against being started twice — the same
       /// re-entrancy shape as GpsLoopActive.
       TickActive: bool
+      /// The job whose cancellation is awaiting confirmation.
+      ///
+      /// Inline rather than a modal alert: the product register is explicit
+      /// that a modal is usually laziness, and an inline bar keeps the job it
+      /// refers to on screen while the question is asked.
+      ConfirmingCancel: int option
       Error: string option }
 
 module Model =
@@ -102,6 +108,7 @@ module Model =
           LoginEmail = "contact@mikesplumbing.ca"; LoginPassword = "Provider1!"; SigningIn = false
           Notices = []; NextNoticeId = 1
           Clock = None; DemoNow = DemoClock.epoch; TickActive = false
+          ConfirmingCancel = None
           Error = None }
 
 type Msg =
@@ -128,6 +135,9 @@ type Msg =
     /// The provider could not cancel at all. A marketplace where only one side
     /// can walk away is not a marketplace, and the plan's asymmetry table had
     /// this as its first row.
+    /// Asks; does not act. Cancelling is irreversible and was one tap.
+    | RequestCancel of jobId: int
+    | DismissCancel
     | CancelJob of jobId: int
     | JobActioned of JobDto
     | GpsTick of jobId: int
@@ -202,6 +212,14 @@ type ProviderApiDeps =
       GetClock: unit -> Task<Result<DemoClockDto, string>>
       ProposeReschedule: ProposeRescheduleRequest -> Task<Result<JobDto, string>>
       CancelJob: ReportNoShowRequest -> Task<Result<JobDto, string>>
+      /// Remember who is signed in across app launches.
+      ///
+      /// Deliberately plain Preferences, not SecureStorage. The token is
+      /// literally "fake-customer-1" (see Auth.fs) and putting it behind the
+      /// keychain would imply a credential store this prototype does not have
+      /// and must not pretend to have.
+      SaveSession: Session option -> unit
+      RestoreSession: unit -> Session option
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 

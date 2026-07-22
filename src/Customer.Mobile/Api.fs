@@ -12,6 +12,8 @@ let createDepsWith
     (gpsLocation: unit -> Task<Result<float * float, string>>)
     (sendTyping: int -> int -> string -> unit)
     (sendSeen: int -> int -> string -> unit)
+    (saveSession: Session option -> unit)
+    (restoreSession: unit -> Session option)
     (handler: HttpMessageHandler)
     (baseUrl: string) : ApiDeps =
     let http = new HttpClient(handler, BaseAddress = Uri(baseUrl))
@@ -34,5 +36,7 @@ let createDepsWith
       GetLocation = fun providerId -> Http.getEnv http (sprintf "/location?providerId=%d" providerId)
       DecideReschedule = fun req -> Http.postEnv http "/jobs/reschedule/decision" req
       ReportNoShow = fun req -> Http.postEnv http "/jobs/no-show" req
+      SaveSession = saveSession
+      RestoreSession = restoreSession
       SendTyping = sendTyping
       SendSeen = sendSeen }

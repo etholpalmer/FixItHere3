@@ -109,7 +109,13 @@ let view (model: Model) (jobId: int) =
                 (HStack(spacing = 8.) {
                     Button("Call", StartFakeCall)
                     Button("Chat", Navigate (Chat job.Id))
-                    Button("Cancel Job", CancelActiveJob job.Id)
+                    // Asks first. Cancelling is irreversible and was one tap
+                    // away, on a screen an investor is handed to poke at.
+                    if model.ConfirmingCancel = Some job.Id then
+                        Button("Yes, cancel", CancelActiveJob job.Id).textColor(Theme.danger)
+                        Button("Keep it", DismissCancel)
+                    else
+                        Button("Cancel Job", RequestCancel job.Id)
                     // Appears only once the grace window has actually elapsed.
                     // Escalation is mechanical, not scripted: the same clock
                     // that runs the countdown decides when this exists.

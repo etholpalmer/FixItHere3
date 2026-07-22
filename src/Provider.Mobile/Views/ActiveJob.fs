@@ -118,7 +118,11 @@ let view (model: Model) (jobId: int) =
                     | None -> ()
                     Button("Chat", Navigate (Chat job.Id))
                     Button("Call", StartFakeCall)
-                    Button("Cancel", CancelJob job.Id).textColor(Theme.danger)
+                    if model.ConfirmingCancel = Some job.Id then
+                        Button("Yes, cancel", CancelJob job.Id).textColor(Theme.danger)
+                        Button("Keep it", DismissCancel)
+                    else
+                        Button("Cancel", RequestCancel job.Id).textColor(Theme.danger)
                 }).gridRow(3)
             }).padding(12.)
         )

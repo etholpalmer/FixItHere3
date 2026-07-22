@@ -71,6 +71,8 @@ let stubDeps : ProviderApiDeps =
                                                  Rate = 1.0; Running = true } : DemoClockDto))
       ProposeReschedule = fun _ -> Task.FromResult(Ok (mkJob 1 "Scheduled"))
       CancelJob = fun _ -> Task.FromResult(Ok (mkJob 1 "Cancelled"))
+      SaveSession = fun _ -> ()
+      RestoreSession = fun () -> None
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 
@@ -434,3 +436,26 @@ let ``proposing tells the provider the ball is in the customer's court`` () =
     let job = { mkJob 7 "Scheduled" with PromisedStart = (DemoClock.epoch.AddHours 2.0).ToString "o" }
     let m = up (ProposeDelay (7, 15)) { Model.initial with Jobs = [ job ] }
     Assert.Contains("Asked the customer", (List.head m.Notices).Text)
+
+[<Fact>]
+let ``a restored session skips the login screen`` () =
+    let saved : Session =
+        { Token = "fake-provider-1"; UserId = 1; Role = "Provider"; DisplayName = "Mike's Plumbing" }
+    let deps = { stubDeps with RestoreSession = fun () -> Some saved }
+    let m, cmd = Update.update deps SplashDone Model.initial
+    Assert.Equal(Home, m.Screen)
+    Assert.Equal(Some saved, m.Session)
+    Assert.False(List.isEmpty cmd)
+    Assert.Equal(Login, (fst (Update.update stubDeps SplashDone Model.initial)).Screen)
+
+[<Fact>]
+let ``the provider's cancel asks first too`` () =
+    // Bilateral cancel means bilateral confirmation; a provider dropping a job
+    // by mis-tap is the more damaging of the two.
+    let asked = up (RequestCancel 7) Model.initial
+    Assert.Equal(Some 7, asked.ConfirmingCancel)
+    let _, askCmd = Update.update stubDeps (RequestCancel 7) Model.initial
+    Assert.True(List.isEmpty askCmd)
+    let m, cmd = Update.update stubDeps (CancelJob 7) asked
+    Assert.Equal(None, m.ConfirmingCancel)
+    Assert.False(List.isEmpty cmd)

@@ -6,8 +6,42 @@ open Fabulous.Maui
 open Microsoft.Maui.Devices
 open Microsoft.Maui.Hosting
 open Microsoft.Maui.Media
+open Microsoft.Maui.Storage
 open FixItHere.ClientShared
 open FixItHere.Customer
+
+/// Session persistence.
+///
+/// Plain `Preferences`, not `SecureStorage`: the token is "fake-customer-1"
+/// (Auth.fs), and reaching for the keychain would dress a demo credential up as
+/// a real one. Stored as four flat keys rather than serialised JSON so a shape
+/// change cannot produce a half-parsed session — a missing key just means "not
+/// signed in", which is the safe answer.
+module private SessionStore =
+    let private key n = "fixithere.session." + n
+
+    let save (s: Session option) =
+        match s with
+        | Some v ->
+            Preferences.Default.Set(key "token", v.Token)
+            Preferences.Default.Set(key "userId", v.UserId)
+            Preferences.Default.Set(key "role", v.Role)
+            Preferences.Default.Set(key "name", v.DisplayName)
+        | None ->
+            for n in [ "token"; "userId"; "role"; "name" ] do
+                Preferences.Default.Remove(key n)
+
+    let restore () : Session option =
+        let token = Preferences.Default.Get(key "token", "")
+        let role = Preferences.Default.Get(key "role", "")
+        let name = Preferences.Default.Get(key "name", "")
+        let userId = Preferences.Default.Get(key "userId", 0)
+        // Every field or nothing. A partially-written session would sign someone
+        // in as an actor with no id, and this codebase has already spent four
+        // separate bugs on identity being half-specified.
+        if token <> "" && role <> "" && userId > 0
+        then Some { Token = token; UserId = userId; Role = role; DisplayName = name }
+        else None
 
 /// Shrink a photo until it fits the wire budget, rather than refusing it.
 ///
@@ -83,7 +117,7 @@ let private hub =
     FixItHere.ClientShared.Hub.HubClient(Config.baseUrl)
 
 let private deps =
-    Api.createDepsWith pickPhoto gpsLocation hub.SendTyping hub.SendSeen (new System.Net.Http.HttpClientHandler()) Config.baseUrl
+    Api.createDepsWith pickPhoto gpsLocation hub.SendTyping hub.SendSeen SessionStore.save SessionStore.restore (new System.Net.Http.HttpClientHandler()) Config.baseUrl
 
 let mutable private hubStarted = false
 

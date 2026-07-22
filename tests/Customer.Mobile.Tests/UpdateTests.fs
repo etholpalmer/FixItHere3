@@ -77,6 +77,8 @@ let stubDeps : ApiDeps =
                                                      UpdatedAt = "" } : LocationDto))
       DecideReschedule = fun _ -> Task.FromResult(Ok stubJob)
       ReportNoShow = fun _ -> Task.FromResult(Ok stubJob)
+      SaveSession = fun _ -> ()
+      RestoreSession = fun () -> None
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 
@@ -437,4 +439,47 @@ let ``booking also asks where the provider is`` () =
     // tapping into Tracking performs was silently skipped when arriving there
     // by booking — the ETA line read "Locating provider…" for the whole wait.
     let _, cmd = Update.update stubDeps (JobCreated stubJob) Model.initial
+    Assert.False(List.isEmpty cmd)
+
+[<Fact>]
+let ``a restored session skips the login screen and loads the world`` () =
+    // An app backgrounded and killed mid-demo used to return to sign-in, which
+    // reads as the session having expired rather than the process restarting.
+    let saved : Session =
+        { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John Reyes" }
+    let deps = { stubDeps with RestoreSession = fun () -> Some saved }
+    let m, cmd = Update.update deps SplashDone Model.initial
+    Assert.Equal(Home, m.Screen)
+    Assert.Equal(Some saved, m.Session)
+    Assert.False(List.isEmpty cmd)          // it also rehydrates jobs and the clock
+
+    // ...and with nothing stored it still lands on Login.
+    let m2, _ = Update.update stubDeps SplashDone Model.initial
+    Assert.Equal(Login, m2.Screen)
+
+[<Fact>]
+let ``signing in persists the session`` () =
+    let saved = System.Collections.Generic.List<Session option>()
+    let deps = { stubDeps with SaveSession = saved.Add }
+    let resp : LoginResponse =
+        { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John Reyes" }
+    Update.update deps (LoggedIn resp) Model.initial |> ignore
+    Assert.Equal(1, saved.Count)
+    Assert.True saved.[0].IsSome
+
+[<Fact>]
+let ``cancelling asks before it acts, and only for the job that was asked about`` () =
+    // Cancelling is irreversible and was one tap, on a screen an investor is
+    // handed to poke at.
+    let asked = up (RequestCancel 7) Model.initial
+    Assert.Equal(Some 7, asked.ConfirmingCancel)
+    // Asking must not itself cancel anything.
+    let _, askCmd = Update.update stubDeps (RequestCancel 7) Model.initial
+    Assert.True(List.isEmpty askCmd)
+
+    Assert.Equal(None, (up DismissCancel asked).ConfirmingCancel)
+
+    // Confirming issues the call and clears the prompt.
+    let m, cmd = Update.update stubDeps (CancelActiveJob 7) asked
+    Assert.Equal(None, m.ConfirmingCancel)
     Assert.False(List.isEmpty cmd)

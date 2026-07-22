@@ -88,6 +88,12 @@ type Model =
       /// Guards the tick loop against being started twice — the same
       /// re-entrancy shape as GpsLoopActive.
       TickActive: bool
+      /// The job whose cancellation is awaiting confirmation.
+      ///
+      /// Inline rather than a modal alert: the product register is explicit
+      /// that a modal is usually laziness, and an inline bar keeps the job it
+      /// refers to on screen while the question is asked.
+      ConfirmingCancel: int option
       Error: string option }
 
 module Model =
@@ -103,6 +109,7 @@ module Model =
           LoginEmail = "john.reyes@gmail.com"; LoginPassword = "Customer1!"; SigningIn = false
           Notices = []; NextNoticeId = 1
           Clock = None; DemoNow = DemoClock.epoch; TickActive = false
+          ConfirmingCancel = None
           Error = None }
 
 type Msg =
@@ -119,6 +126,9 @@ type Msg =
     | JobsLoaded of JobDto list
     | BookJob of providerId: int * serviceId: int * schedule: string
     | JobCreated of JobDto
+    /// Asks; does not act. Cancelling is irreversible and was one tap.
+    | RequestCancel of jobId: int
+    | DismissCancel
     | CancelActiveJob of jobId: int
     /// Answer a pending proposal. Accepting moves the promise; declining leaves
     /// the original standing, which is what makes the no-show countdown resume
@@ -196,6 +206,14 @@ type ApiDeps =
       GetLocation: int -> Task<Result<LocationDto, string>>
       DecideReschedule: RescheduleDecisionRequest -> Task<Result<JobDto, string>>
       ReportNoShow: ReportNoShowRequest -> Task<Result<JobDto, string>>
+      /// Remember who is signed in across app launches.
+      ///
+      /// Deliberately plain Preferences, not SecureStorage. The token is
+      /// literally "fake-customer-1" (see Auth.fs) and putting it behind the
+      /// keychain would imply a credential store this prototype does not have
+      /// and must not pretend to have.
+      SaveSession: Session option -> unit
+      RestoreSession: unit -> Session option
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 

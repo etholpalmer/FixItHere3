@@ -52,7 +52,17 @@ let init () = Model.initial, delayCmd 1500 SplashDone
 
 let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     match msg with
-    | SplashDone -> { model with Screen = Login; History = [] }, Cmd.none
+    | SplashDone ->
+        // Restore rather than always landing on Login. An app backgrounded and
+        // killed mid-demo used to come back to a sign-in screen, which reads as
+        // the session having expired rather than the process having restarted.
+        match deps.RestoreSession () with
+        | None -> { model with Screen = Login; History = [] }, Cmd.none
+        | Some s ->
+            Nav.resetTo Home { model with Session = Some s },
+            Cmd.batch
+                [ apiCmd (fun () -> deps.GetJobs s.UserId) JobsLoaded
+                  apiCmd deps.GetClock ClockSynced ]
     | LoginEmailChanged e -> { model with LoginEmail = e }, Cmd.none
     | LoginPasswordChanged p -> { model with LoginPassword = p }, Cmd.none
     | SignIn when model.SigningIn -> model, Cmd.none    // ignore a double tap
@@ -64,6 +74,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         // Session and LoginResponse now share a field set, so annotate explicitly.
         let session : Session = { Token = resp.Token; UserId = resp.UserId
                                   Role = resp.Role; DisplayName = resp.DisplayName }
+        deps.SaveSession (Some session)
         Nav.resetTo Home { model with Session = Some session },
         Cmd.batch
             [ apiCmd (fun () -> deps.GetJobs resp.UserId) JobsLoaded
@@ -145,10 +156,12 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         { model with DemoNow = now; Notices = Notify.prune now model.Notices },
         delayCmd tickMs DemoTick
     | DismissNotice id -> { model with Notices = Notify.dismiss id model.Notices }, Cmd.none
+    | RequestCancel jobId -> { model with ConfirmingCancel = Some jobId }, Cmd.none
+    | DismissCancel -> { model with ConfirmingCancel = None }, Cmd.none
     | CancelActiveJob jobId ->
         let req : ReportNoShowRequest =
             { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer }
-        model, apiCmd (fun () -> deps.CancelJob req) HubJobUpdated
+        { model with ConfirmingCancel = None }, apiCmd (fun () -> deps.CancelJob req) HubJobUpdated
     | AnswerReschedule (jobId, accept) ->
         let req : RescheduleDecisionRequest =
             { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer; Accept = accept }
