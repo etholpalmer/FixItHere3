@@ -6,7 +6,8 @@ open FixItHere.Provider
 open FixItHere.Shared
 
 let view (model: Model) (jobId: int) =
-    (VStack(spacing = 16.) {
+    ScrollView(
+     (VStack(spacing = 16.) {
         match model.PaymentResult with
         | None ->
             Label("Payment Authorized").font(size = 28.).centerTextHorizontal()
@@ -34,4 +35,4 @@ let view (model: Model) (jobId: int) =
                 Label(sprintf "Job #%d · %s" r.JobId r.Status).font(size = 11.)
             }
             Button("Rate customer", Navigate (RateCustomer jobId))
-    }).centerVertical().padding(24.)
+     }).centerVertical().padding(24.))

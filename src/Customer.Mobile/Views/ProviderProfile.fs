@@ -8,9 +8,13 @@ open FixItHere.Shared
 let view (model: Model) (providerId: int) =
     match model.Providers |> List.tryFind (fun p -> p.Id = providerId) with
     | None ->
-        (VStack(spacing = 12.) { Button("← Back", GoBack); Label("Provider not found") }).padding(24.)
+        // Both arms scroll so they share a type; a match whose branches return
+        // different widget types will not compile.
+        ScrollView(
+         (VStack(spacing = 12.) { Button("← Back", GoBack); Label("Provider not found") }).padding(24.))
     | Some p ->
-        (VStack(spacing = 12.) {
+        ScrollView(
+         (VStack(spacing = 12.) {
             Button("← Back", GoBack)
             Label(p.BusinessName).font(size = 28.)
             Label(sprintf "%s — %s" p.ServiceName p.Vehicle)
@@ -26,4 +30,4 @@ let view (model: Model) (providerId: int) =
                             (Format.shortDate r.CreatedAt)).font(size = 12.)
                     Label(r.Comment)
                 }
-        }).padding(24.)
+         }).padding(24.))

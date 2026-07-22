@@ -16,7 +16,8 @@ let private urgencyColor (u: Urgency) =
 
 let view (model: Model) =
     let name = model.Session |> Option.map (fun s -> s.DisplayName) |> Option.defaultValue ""
-    (VStack(spacing = 12.) {
+    ScrollView(
+     (VStack(spacing = 12.) {
         Label(sprintf "%s" name).font(size = 28.)
         (HStack(spacing = 8.) {
             Label(if model.Online then "● Online" else "○ Offline").font(size = 18.)
@@ -46,4 +47,4 @@ let view (model: Model) =
                 | None -> ()
         else
             Label("Go Online to see available jobs")
-    }).padding(24.)
+     }).padding(24.))

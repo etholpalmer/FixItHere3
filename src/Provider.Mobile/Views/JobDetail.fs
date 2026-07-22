@@ -6,7 +6,8 @@ open FixItHere.Provider
 
 let view (model: Model) (jobId: int) =
     let job = model.Jobs |> List.tryFind (fun j -> j.Id = jobId)
-    (VStack(spacing = 12.) {
+    ScrollView(
+     (VStack(spacing = 12.) {
         Button("← Back", GoBack)
         match job with
         | Some j ->
@@ -17,4 +18,4 @@ let view (model: Model) (jobId: int) =
             Label(sprintf "Scheduled for: %s" j.ScheduledFor)
             Button("Accept", AcceptJob j.Id)
         | None -> Label("Job not found")
-    }).padding(24.)
+     }).padding(24.))

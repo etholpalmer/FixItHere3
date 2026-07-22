@@ -6,7 +6,8 @@ open FixItHere.ClientShared
 open FixItHere.Customer
 
 let view (model: Model) =
-    (VStack(spacing = 12.) {
+    ScrollView(
+     (VStack(spacing = 12.) {
         Button("← Back", GoBack)
         Label("Nearby providers").font(size = 24.)
         for p in model.Providers do
@@ -14,4 +15,4 @@ let view (model: Model) =
             let dot = if p.Online then "●" else "○"
             Button(sprintf "%s %s  ★%.1f (%d)  %.1f km" dot p.BusinessName p.Rating p.RatingCount km,
                    Navigate (ProviderProfile p.Id))
-    }).padding(24.)
+     }).padding(24.))

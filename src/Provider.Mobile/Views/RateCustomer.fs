@@ -5,7 +5,8 @@ open type Fabulous.Maui.View
 open FixItHere.Provider
 
 let view (model: Model) (jobId: int) =
-    (VStack(spacing = 16.) {
+    ScrollView(
+     (VStack(spacing = 16.) {
         Label("Rate your customer").font(size = 28.).centerTextHorizontal()
         (HStack(spacing = 4.) {
             for i in 1 .. 5 do
@@ -13,4 +14,4 @@ let view (model: Model) (jobId: int) =
         }).centerHorizontal()
         Entry(model.RatingComment, RatingCommentChanged)
         Button("Submit", SubmitRating (jobId, model.RatingStars, model.RatingComment))
-    }).centerVertical().padding(24.)
+     }).centerVertical().padding(24.))

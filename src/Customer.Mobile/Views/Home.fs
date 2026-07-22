@@ -26,7 +26,8 @@ let private urgencyColor (u: Urgency) =
 
 let view (model: Model) =
     let name = model.Session |> Option.map (fun s -> s.DisplayName) |> Option.defaultValue ""
-    (VStack(spacing = 12.) {
+    ScrollView(
+     (VStack(spacing = 12.) {
         Label(sprintf "Hi, %s" name).font(size = 28.)
         Button("Book a New Service", Navigate Catalog)
         Label("Your active jobs").font(size = 18.)
@@ -45,4 +46,4 @@ let view (model: Model) =
                     .textColor(urgencyColor c.Urgency)
             | None ->
                 Label(statusOf j.State).font(size = 12.)
-    }).padding(24.)
+     }).padding(24.))
