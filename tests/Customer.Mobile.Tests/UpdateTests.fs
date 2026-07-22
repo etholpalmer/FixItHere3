@@ -430,3 +430,11 @@ let ``booking replaces the booking screen rather than stacking on it`` () =
     Assert.Equal(Tracking stubJob.Id, m.Screen)
     Assert.Empty m.History
     Assert.Equal(Home, (up GoBack m).Screen)
+
+[<Fact>]
+let ``booking also asks where the provider is`` () =
+    // Nav.resetTo bypasses the Navigate handler, so the position fetch that
+    // tapping into Tracking performs was silently skipped when arriving there
+    // by booking — the ETA line read "Locating provider…" for the whole wait.
+    let _, cmd = Update.update stubDeps (JobCreated stubJob) Model.initial
+    Assert.False(List.isEmpty cmd)

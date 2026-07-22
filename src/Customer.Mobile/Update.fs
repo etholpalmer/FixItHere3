@@ -113,7 +113,13 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         // handed the phone does exactly that. Back from Tracking now lands on
         // Home, which is also where someone who just booked expects to be.
         let m = { model with Jobs = job :: model.Jobs }
-        Nav.resetTo (Tracking job.Id) m, Cmd.none
+        // Seed the provider's position here too. `Nav.resetTo` does not go
+        // through the `Navigate` handler, so arriving at Tracking *by booking*
+        // skipped the fetch that arriving by tap performs — and the ETA line
+        // sat on "Locating provider…" for the whole wait. A regression from
+        // the back-re-books fix, caught by the walkthrough.
+        Nav.resetTo (Tracking job.Id) m,
+        apiCmd (fun () -> deps.GetLocation job.ProviderId) HubLocationUpdated
     | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
     | ClockSynced dto ->
