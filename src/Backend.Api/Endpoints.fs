@@ -247,7 +247,21 @@ let mapAll (app: WebApplication) =
     mapTransition "arrive"   Arrive
     mapTransition "start"    StartWork
     mapTransition "complete" CompleteWork
-    mapTransition "cancel"   Cancel
+
+    // Cancel is bilateral and asymmetric to the rest: every other transition
+    // has exactly one party who can legally perform it, so the path alone
+    // identifies the actor. Cancel does not, and "Cancelled" with no actor
+    // cannot tell a customer changing their mind from a provider dropping the
+    // job. The role is required rather than defaulted.
+    app.MapPost("/jobs/cancel",
+        Func<ReportNoShowRequest, JobService, System.Threading.Tasks.Task<IResult>>(fun req svc -> task {
+            match ActorRole.ofWire req.ByRole with
+            | None -> return err 400 (sprintf "Unknown role '%s'." req.ByRole)
+            | Some role ->
+                match! svc.ApplyBy req.JobId Cancel (Some role) with
+                | Ok dto -> return okJson dto
+                | Error msg when msg.Contains "not found" -> return err 404 msg
+                | Error msg -> return err 409 msg })) |> ignore
 
     app.MapGet("/messages", Func<AppDb, int, IResult>(fun db jobId ->
         okJson (db.Messages.Where(fun m -> m.JobId = jobId).OrderBy(fun m -> m.Id)

@@ -34,11 +34,10 @@ let createDepsWith
       SendMessage = fun req -> Http.postEnv http "/messages" req
       SimulatePayment = fun jobId -> Http.postEnv http "/payment/simulate" { JobId = jobId }
       SubmitRating = fun req -> Http.postEnv http "/ratings" req
-      StartDemo = fun customerId providerId ->
-          Http.postEnv http "/dev/demo/start" {| customerId = customerId; providerId = providerId |}
       PickPhoto = pickPhoto
       GetGpsLocation = gpsLocation
       GetClock = fun () -> Http.getEnv http "/demo/clock"
       ProposeReschedule = fun req -> Http.postEnv http "/jobs/reschedule" req
+      CancelJob = fun req -> Http.postEnv http "/jobs/cancel" req
       SendTyping = sendTyping
       SendSeen = sendSeen }

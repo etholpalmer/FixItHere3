@@ -24,7 +24,7 @@ let ``job round-trips through sqlite`` () =
           ScheduledFor = "2026-01-01T09:00:00Z"
           PromisedStart = "2026-01-01T09:00:00Z"
           ProposedStart = ""; ProposedBy = ""
-          ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = false
+          ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = false; CancelledBy = ""
           Lat = 43.65; Lng = -79.38; Address = "1 Yonge St, Toronto" }
     db.Jobs.Add(job) |> ignore
     db.SaveChanges() |> ignore

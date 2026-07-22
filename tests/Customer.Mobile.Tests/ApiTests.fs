@@ -32,7 +32,7 @@ let ``success envelope maps to Ok`` () =
 let ``failure envelope maps to Error with message`` () =
     let deps = depsWith HttpStatusCode.Conflict
                  """{"success":false,"data":null,"error":"Invalid transition"}"""
-    match (deps.CancelJob 5).Result with
+    match (deps.CancelJob { JobId = 5; ByRole = "Customer" }).Result with
     | Error e -> Assert.Contains("Invalid transition", e)
     | Ok _ -> failwith "expected Error"
 

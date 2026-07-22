@@ -155,11 +155,11 @@ type Msg =
     | HubNotification of string
     | HubTyping of jobId: int * senderId: int * senderRole: string
     | HubSeen of jobId: int * senderId: int * senderRole: string
-    | TypingExpired of token: int
+    /// Named for whose typing it is, matching the provider app. The two apps
+    /// called the same concept different things, which is how a shared handler
+    /// gets written twice and then diverges.
+    | ProviderTypingExpired of token: int
     | TypingCooldownDone
-    /// No longer reachable from the UI. The /dev console has its own Start Demo,
-    /// but it POSTs /dev/demo/start directly rather than dispatching this.
-    | StartDemo
     | DismissNotice of int
     /// One tick, every 250 ms of real time. Recomputes DemoNow from the clock
     /// map and prunes expired notices. 250 rather than 1000 because at 60x a
@@ -177,12 +177,11 @@ type ApiDeps =
       GetRatings: int -> Task<Result<RatingDto list, string>>
       GetJobs: int -> Task<Result<JobDto list, string>>
       CreateJob: CreateJobRequest -> Task<Result<JobDto, string>>
-      CancelJob: int -> Task<Result<JobDto, string>>
+      CancelJob: ReportNoShowRequest -> Task<Result<JobDto, string>>
       GetMessages: int -> Task<Result<MessageDto list, string>>
       SendMessage: SendMessageRequest -> Task<Result<MessageDto, string>>
       SimulatePayment: int -> Task<Result<PaymentResult, string>>
       SubmitRating: CreateRatingRequest -> Task<Result<RatingDto, string>>
-      StartDemo: int -> int -> Task<Result<JobDto, string>>   // customerId, providerId
       // MAUI-implemented effects, injected like the HTTP calls so update stays pure:
       PickPhoto: unit -> Task<Result<string, string>>          // base64 jpeg/png ≤ ~100KB
       GetGpsLocation: unit -> Task<Result<float * float, string>>

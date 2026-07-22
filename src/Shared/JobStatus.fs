@@ -75,6 +75,19 @@ module JobStatus =
         | InProgress -> Some ("Complete", CompleteWork)
         | Completed | Closed | Cancelled | ProviderNoShow -> None
 
+    /// Cancellation, worded by who did it.
+    ///
+    /// `Cancelled` alone was indistinguishable from a leaked enum name and said
+    /// nothing about whose decision it was. The actor is a job field now, so
+    /// the copy can finally be specific.
+    let cancelledBy (forRole: ActorRole) (by: ActorRole option) =
+        match forRole, by with
+        | ActorRole.Customer, Some ActorRole.Customer -> "You cancelled this booking"
+        | ActorRole.Customer, Some ActorRole.Provider -> "Your provider cancelled this booking"
+        | ActorRole.Provider, Some ActorRole.Provider -> "You cancelled this job"
+        | ActorRole.Provider, Some ActorRole.Customer -> "The customer cancelled this job"
+        | _, None -> "This job was cancelled"
+
     /// A job someone is actively working. Terminal states are not in flight —
     /// including ProviderNoShow, which would otherwise keep a dead job pinned
     /// as the provider's one active job forever.

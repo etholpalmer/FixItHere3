@@ -125,6 +125,10 @@ type Msg =
     /// rather than typed: the provider is in a vehicle, and a free-text time
     /// picker is not a thing anyone completes at the roadside.
     | ProposeDelay of jobId: int * minutes: int
+    /// The provider could not cancel at all. A marketplace where only one side
+    /// can walk away is not a marketplace, and the plan's asymmetry table had
+    /// this as its first row.
+    | CancelJob of jobId: int
     | JobActioned of JobDto
     | GpsTick of jobId: int
     | GpsFetched of jobId: int * lat: float * lng: float
@@ -157,8 +161,6 @@ type Msg =
     /// console drives provider position via PUT /location, not via these.
     | SetLocation of lat: float * lng: float
     | SetUseRealGps of bool
-    | StartDemo
-    | DemoStarted of JobDto
     | HubJobUpdated of JobDto
     | HubMessageReceived of MessageDto
     | HubLocationUpdated of LocationDto
@@ -192,7 +194,6 @@ type ProviderApiDeps =
       SendMessage: SendMessageRequest -> Task<Result<MessageDto, string>>
       SimulatePayment: int -> Task<Result<PaymentResult, string>>
       SubmitRating: CreateRatingRequest -> Task<Result<RatingDto, string>>
-      StartDemo: int -> int -> Task<Result<JobDto, string>>   // customerId, providerId
       PickPhoto: unit -> Task<Result<string, string>>
       GetGpsLocation: unit -> Task<Result<float * float, string>>
       /// Startup and reconnect resync. A client that missed a ClockUpdated
@@ -200,6 +201,7 @@ type ProviderApiDeps =
       /// it has to ask.
       GetClock: unit -> Task<Result<DemoClockDto, string>>
       ProposeReschedule: ProposeRescheduleRequest -> Task<Result<JobDto, string>>
+      CancelJob: ReportNoShowRequest -> Task<Result<JobDto, string>>
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 

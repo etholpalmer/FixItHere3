@@ -108,8 +108,12 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                   ScheduleChoice = schedule; Lat = lat; Lng = lng; Address = "My location" }
             model, apiCmd (fun () -> deps.CreateJob req) JobCreated
     | JobCreated job ->
+        // resetTo, not push. Pushing left Booking underneath Tracking, so
+        // back-back-tap booked the same job a second time — and an investor
+        // handed the phone does exactly that. Back from Tracking now lands on
+        // Home, which is also where someone who just booked expects to be.
         let m = { model with Jobs = job :: model.Jobs }
-        Nav.push m (Tracking job.Id), Cmd.none
+        Nav.resetTo (Tracking job.Id) m, Cmd.none
     | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
     | ClockSynced dto ->
@@ -136,7 +140,9 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         delayCmd tickMs DemoTick
     | DismissNotice id -> { model with Notices = Notify.dismiss id model.Notices }, Cmd.none
     | CancelActiveJob jobId ->
-        model, apiCmd (fun () -> deps.CancelJob jobId) HubJobUpdated
+        let req : ReportNoShowRequest =
+            { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer }
+        model, apiCmd (fun () -> deps.CancelJob req) HubJobUpdated
     | AnswerReschedule (jobId, accept) ->
         let req : RescheduleDecisionRequest =
             { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer; Accept = accept }
@@ -234,13 +240,6 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         apiCmd deps.GetGpsLocation (fun (la, ln) -> SetLocation (la, ln))
     | SetUseRealGps false ->
         { model with UseRealGps = false; MyLocation = Model.initial.MyLocation }, Cmd.none
-    | StartDemo ->
-        match model.Session with
-        | None -> model, Cmd.ofMsg (ApiError "Not logged in")
-        | Some s ->
-            match model.Providers |> List.tryFind (fun p -> p.Online) |> Option.orElse (model.Providers |> List.tryHead) with
-            | Some provider -> model, apiCmd (fun () -> deps.StartDemo s.UserId provider.Id) JobCreated
-            | None -> model, Cmd.ofMsg (ApiError "No providers available")
     | HubJobUpdated job ->
         let jobs =
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)
@@ -278,7 +277,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         Cmd.none
     | HubProviderUpdated dto ->
         // Keep the cached provider list fresh so online/offline changes are
-        // reflected (StartDemo picks the first online provider from this list).
+        // reflected in the catalogue.
         let providers =
             if model.Providers |> List.exists (fun p -> p.Id = dto.Id)
             then model.Providers |> List.map (fun p -> if p.Id = dto.Id then dto else p)
@@ -292,7 +291,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
             let token = model.TypingToken + 1
-            { model with ProviderTyping = true; TypingToken = token }, delayCmd 3000 (TypingExpired token)
+            { model with ProviderTyping = true; TypingToken = token }, delayCmd 3000 (ProviderTypingExpired token)
         | _ -> model, Cmd.none
     | HubSeen (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
@@ -308,7 +307,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
              | Some _ -> { model with SeenUpToMessageId = myLatest }
              | None -> model), Cmd.none
         | _ -> model, Cmd.none
-    | TypingExpired token ->
+    | ProviderTypingExpired token ->
         // Ignore stale timers: a newer HubTyping has already extended the window.
         if token = model.TypingToken then { model with ProviderTyping = false }, Cmd.none
         else model, Cmd.none

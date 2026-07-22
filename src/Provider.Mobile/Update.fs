@@ -101,6 +101,10 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | MarkArrived id -> model, apiCmd (fun () -> deps.Arrive id) JobActioned
     | BeginWork id -> model, apiCmd (fun () -> deps.Start id) JobActioned
     | FinishWork id -> model, apiCmd (fun () -> deps.Complete id) JobActioned
+    | CancelJob jobId ->
+        let req : ReportNoShowRequest =
+            { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Provider }
+        model, apiCmd (fun () -> deps.CancelJob req) HubJobUpdated
     | ProposeDelay (jobId, minutes) ->
         match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
         | None -> model, Cmd.none
@@ -276,12 +280,6 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | SetUseRealGps false ->
         { model with UseRealGps = false; MyLocation = Model.initial.MyLocation
                      SliderStart = None }, Cmd.none
-    | StartDemo ->
-        match model.Session with
-        | Some s -> model, apiCmd (fun () -> deps.StartDemo 1 s.UserId) DemoStarted   // customer 1 = John (seed order)
-        | None -> model, Cmd.ofMsg (ApiError "Not logged in")
-    | DemoStarted job ->
-        notify NoticeKind.Info (Some job.Id) (sprintf "Demo started (job #%d)" job.Id) model, Cmd.none
     | HubJobUpdated job ->
         let jobs =
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)

@@ -32,6 +32,11 @@ type Job =
       /// Seeded jobs are false: they exist to populate lists, and letting the
       /// demo clock march over their grace windows fires a no-show storm.
       IsDemoTracked: bool
+      /// "" | "Customer" | "Provider". `Cancelled` on its own says a job did
+      /// not happen but not whose decision that was — which is the difference
+      /// between a customer changing their mind and a provider dropping the
+      /// job, and no marketplace can be indifferent to it.
+      CancelledBy: string
       Lat: float; Lng: float; Address: string }
 
 [<CLIMutable>]

@@ -126,6 +126,7 @@ let run (db: AppDb) =
           // Seeded jobs populate lists; they are not what the demo drives. True
           // here would march thirty grace windows past on any accelerated run.
           IsDemoTracked = false
+          CancelledBy = ""
           Lat = c.Lat; Lng = c.Lng
           Address = c.Address }
     // 50 finished (alternate Completed/Closed), 30 pending

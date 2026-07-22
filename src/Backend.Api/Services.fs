@@ -95,10 +95,16 @@ let toJobDto (db: AppDb) (j: Job) : JobDto =
       ProposedStart = j.ProposedStart; ProposedBy = j.ProposedBy
       ProposalReason = j.ProposalReason; ProposalExpiresAt = j.ProposalExpiresAt
       IsDemoTracked = j.IsDemoTracked
+      CancelledBy = j.CancelledBy
       Lat = j.Lat; Lng = j.Lng; Address = j.Address }
 
 type JobService(db: AppDb, hub: IBroadcaster) =
-    member _.Apply (jobId: int) (event: JobEvent) : Task<Result<JobDto, string>> =
+    member this.Apply (jobId: int) (event: JobEvent) : Task<Result<JobDto, string>> =
+        this.ApplyBy jobId event None
+
+    /// `by` is recorded only for Cancel; every other transition has exactly one
+    /// party who can legally perform it, so storing an actor would be noise.
+    member _.ApplyBy (jobId: int) (event: JobEvent) (by: ActorRole option) : Task<Result<JobDto, string>> =
         task {
             match db.Jobs.SingleOrDefault(fun j -> j.Id = jobId) |> Option.ofObj with
             | None -> return Error (sprintf "Job %d not found" jobId)
@@ -114,7 +120,11 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                         match next with
                         | Scheduled | EnRoute -> job
                         | _ -> writeReschedule job { readReschedule job with Pending = None }
-                    let updated = { settled with State = JobStateCodec.ofState next }
+                    let withActor =
+                        match event, by with
+                        | Cancel, Some role -> { settled with CancelledBy = ActorRole.toWire role }
+                        | _ -> settled
+                    let updated = { withActor with State = JobStateCodec.ofState next }
                     db.Entry(job).CurrentValues.SetValues(updated)
                     db.SaveChanges() |> ignore
                     let dto = toJobDto db updated
@@ -181,6 +191,7 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                   ProposalReason = ""; ProposalExpiresAt = ""
                   // Booked in-session, so this one *is* the demo.
                   IsDemoTracked = true
+                  CancelledBy = ""
                   Lat = resolvedLat; Lng = resolvedLng; Address = resolvedAddress }
             ignore prov
             db.Jobs.Add job |> ignore

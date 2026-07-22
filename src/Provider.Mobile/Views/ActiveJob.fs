@@ -41,8 +41,9 @@ let private urgencyColor (u: Urgency) =
     | Urgency.Soon -> Microsoft.Maui.Graphics.Color.FromRgb(0x2B, 0x4D, 0x8A)
     | Urgency.Calm -> Microsoft.Maui.Graphics.Color.FromRgb(0x3A, 0x3A, 0x42)
 
-let private statusLine (state: string) =
+let private statusLine (state: string) (cancelledBy: string) =
     match JobStateCodec.tryParse state with
+    | Some Cancelled -> JobStatus.cancelledBy ActorRole.Provider (ActorRole.ofWire cancelledBy)
     | Some s -> JobStatus.forProvider s
     | None -> "Checking status…"
 
@@ -77,7 +78,7 @@ let view (model: Model) (jobId: int) =
             (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto ]) {
                 (VStack(spacing = 4.) {
                     Button("← Back", GoBack)
-                    Label(statusLine job.State).font(size = 20.)
+                    Label(statusLine job.State job.CancelledBy).font(size = 20.)
                     // The countdown is the headline, not a footnote: it is
                     // the number this screen exists to show. One Label rather
                     // than a nested HStack — Fabulous CE rejects nesting here.
@@ -117,6 +118,7 @@ let view (model: Model) (jobId: int) =
                     | None -> ()
                     Button("Chat", Navigate (Chat job.Id))
                     Button("Call", StartFakeCall)
+                    Button("Cancel", CancelJob job.Id).textColor(Theme.danger)
                 }).gridRow(3)
             }).padding(12.)
         )

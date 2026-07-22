@@ -23,13 +23,11 @@ let createDepsWith
       GetRatings = fun providerId -> Http.getEnv http (sprintf "/ratings?providerId=%d" providerId)
       GetJobs = fun customerId -> Http.getEnv http (sprintf "/jobs?customerId=%d" customerId)
       CreateJob = fun req -> Http.postEnv http "/jobs" req
-      CancelJob = fun jobId -> Http.putEnv http (sprintf "/jobs/%d/cancel" jobId)
+      CancelJob = fun req -> Http.postEnv http "/jobs/cancel" req
       GetMessages = fun jobId -> Http.getEnv http (sprintf "/messages?jobId=%d" jobId)
       SendMessage = fun req -> Http.postEnv http "/messages" req
       SimulatePayment = fun jobId -> Http.postEnv http "/payment/simulate" { JobId = jobId }
       SubmitRating = fun req -> Http.postEnv http "/ratings" req
-      StartDemo = fun customerId providerId ->
-          Http.postEnv http "/dev/demo/start" {| customerId = customerId; providerId = providerId |}
       PickPhoto = pickPhoto
       GetGpsLocation = gpsLocation
       GetClock = fun () -> Http.getEnv http "/demo/clock"

@@ -25,7 +25,7 @@ let mkJob id state : JobDto =
       ServiceId = 7; ServiceName = "HVAC"; State = state; Price = 85m
       ScheduledFor = "Now"; PromisedStart = "Now"
       ProposedStart = ""; ProposedBy = ""
-      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; CancelledBy = ""
       Lat = 43.70; Lng = -79.40; Address = "1 Demo St" }
 
 [<Fact>]
@@ -65,12 +65,12 @@ let stubDeps : ProviderApiDeps =
       SendMessage = fun _ -> Task.FromResult(Error "unused")
       SimulatePayment = fun _ -> Task.FromResult(Error "unused")
       SubmitRating = fun _ -> Task.FromResult(Error "unused")
-      StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.70, -79.45))
       GetClock = fun () -> Task.FromResult(Ok ({ DemoNow = ""; AnchorDemo = ""; AnchorReal = ""
                                                  Rate = 1.0; Running = true } : DemoClockDto))
       ProposeReschedule = fun _ -> Task.FromResult(Ok (mkJob 1 "Scheduled"))
+      CancelJob = fun _ -> Task.FromResult(Ok (mkJob 1 "Cancelled"))
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 

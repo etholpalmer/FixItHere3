@@ -532,3 +532,16 @@ let ``times render in the demo timeline, not the operator's timezone`` () =
     let iso = DemoClock.epoch.AddMinutes(23.0).ToString "o"
     Assert.Equal("12:23 AM", Format.clockTime iso)
     Assert.Equal("1 Jan", Format.shortDate iso)
+
+[<Fact>]
+let ``cancellation says whose decision it was, from each side`` () =
+    // "Cancelled" alone cannot tell a customer changing their mind from a
+    // provider dropping the job, and a marketplace cannot be indifferent to
+    // that difference.
+    let c, p = ActorRole.Customer, ActorRole.Provider
+    Assert.Equal("You cancelled this booking", JobStatus.cancelledBy c (Some c))
+    Assert.Equal("Your provider cancelled this booking", JobStatus.cancelledBy c (Some p))
+    Assert.Equal("You cancelled this job", JobStatus.cancelledBy p (Some p))
+    Assert.Equal("The customer cancelled this job", JobStatus.cancelledBy p (Some c))
+    // Older rows carry no actor; the copy degrades rather than guessing.
+    Assert.Equal("This job was cancelled", JobStatus.cancelledBy c None)

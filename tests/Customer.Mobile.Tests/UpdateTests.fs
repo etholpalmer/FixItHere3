@@ -54,7 +54,7 @@ let private stubJob : JobDto =
       ServiceId = 1; ServiceName = "Plumbing"; State = "Scheduled"; Price = 85m
       ScheduledFor = "Now"; PromisedStart = "Now"
       ProposedStart = ""; ProposedBy = ""
-      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; CancelledBy = ""
       Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
 let stubDeps : ApiDeps =
@@ -69,7 +69,6 @@ let stubDeps : ApiDeps =
       SendMessage = fun _ -> Task.FromResult(Error "unused")
       SimulatePayment = fun _ -> Task.FromResult(Error "unused")
       SubmitRating = fun _ -> Task.FromResult(Error "unused")
-      StartDemo = fun _ _ -> Task.FromResult(Error "unused")
       PickPhoto = fun () -> Task.FromResult(Ok "ZmFrZQ==")
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.65, -79.38))
       GetClock = fun () -> Task.FromResult(Ok ({ DemoNow = ""; AnchorDemo = ""; AnchorReal = ""
@@ -88,7 +87,7 @@ let mkJob id state : JobDto =
       ServiceId = 3; ServiceName = "Plumbing"; State = state; Price = 85m
       ScheduledFor = "Now"; PromisedStart = "Now"
       ProposedStart = ""; ProposedBy = ""
-      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; CancelledBy = ""
       Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
 let up msg model = Update.update stubDeps msg model |> fst
@@ -288,7 +287,7 @@ let ``hub typing shows indicator for open chat only`` () =
     Assert.True((up (HubTyping (7, 1, "Provider")) m0).ProviderTyping)
     Assert.False((up (HubTyping (99, 1, "Provider")) m0).ProviderTyping)
     let typing = up (HubTyping (7, 1, "Provider")) m0
-    Assert.False((up (TypingExpired typing.TypingToken) typing).ProviderTyping)
+    Assert.False((up (ProviderTypingExpired typing.TypingToken) typing).ProviderTyping)
 
 [<Fact>]
 let ``hub seen marks messages seen`` () =
@@ -307,12 +306,6 @@ let ``seen watermark is cleared when a chat loads`` () =
             Screen = Chat 7; Session = Some (mkSession ()); SeenUpToMessageId = Some 99 }
     Assert.Equal(None, (up (MessagesLoaded []) m0).SeenUpToMessageId)
 
-[<Fact>]
-let ``start demo errors when not logged in`` () =
-    let _, cmd = Update.update stubDeps StartDemo Model.initial
-    let mutable dispatched = []
-    for sub in cmd do sub (fun m -> dispatched <- m :: dispatched)
-    Assert.Contains(ApiError "Not logged in", dispatched)
 
 // ---------------------------------------------------------------------------
 // Cmd-executing tests — mirrors Provider.Mobile. The `up` helper discards the
@@ -360,8 +353,8 @@ let ``a stale typing-expiry timer does not clear an extended indicator`` () =
     let m1 = up (HubTyping (7, 1, "Provider")) m0
     let m2 = up (HubTyping (7, 1, "Provider")) m1
     Assert.True(m2.ProviderTyping)
-    Assert.True((up (TypingExpired 1) m2).ProviderTyping)
-    Assert.False((up (TypingExpired m2.TypingToken) m2).ProviderTyping)
+    Assert.True((up (ProviderTypingExpired 1) m2).ProviderTyping)
+    Assert.False((up (ProviderTypingExpired m2.TypingToken) m2).ProviderTyping)
 
 [<Fact>]
 let ``hub provider update refreshes the cached provider list`` () =
@@ -426,3 +419,14 @@ let ``answering a proposal actually calls the server`` () =
     Assert.False(List.isEmpty cmd)
     let _, noShowCmd = Update.update stubDeps (ReportNoShow 7) Model.initial
     Assert.False(List.isEmpty noShowCmd)
+
+[<Fact>]
+let ``booking replaces the booking screen rather than stacking on it`` () =
+    // Back-back-tap used to book the same job twice, because JobCreated pushed
+    // Tracking on top of Booking. An investor handed the phone does exactly
+    // that. History is empty now, so back from Tracking lands on Home.
+    let m0 = { Model.initial with Screen = Booking (1, 1); History = [ ProviderProfile 1; Catalog; Home ] }
+    let m = up (JobCreated stubJob) m0
+    Assert.Equal(Tracking stubJob.Id, m.Screen)
+    Assert.Empty m.History
+    Assert.Equal(Home, (up GoBack m).Screen)

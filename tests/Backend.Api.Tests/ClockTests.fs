@@ -235,3 +235,16 @@ let ``an unknown role is rejected rather than guessed`` () =
     Assert.Equal(HttpStatusCode.BadRequest,
                  (propose c job.Id "Admin" (DateTimeOffset.Parse(job.PromisedStart).AddMinutes 15.0)).StatusCode)
     Assert.Equal(HttpStatusCode.BadRequest, (decide c job.Id "" true).StatusCode)
+
+[<Fact>]
+let ``cancelling records who did it, and refuses an unknown role`` () =
+    use c = client ()
+    let job = soonestScheduled c
+    Assert.Equal(HttpStatusCode.BadRequest,
+                 c.PostAsJsonAsync("/jobs/cancel", { JobId = job.Id; ByRole = "Nobody" }).Result.StatusCode)
+
+    let resp = c.PostAsJsonAsync("/jobs/cancel", { JobId = job.Id; ByRole = "Provider" }).Result
+    Assert.Equal(HttpStatusCode.OK, resp.StatusCode)
+    let dto = resp.Content.ReadFromJsonAsync<Envelope<JobDto>>().Result.Data
+    Assert.Equal("Cancelled", dto.State)
+    Assert.Equal("Provider", dto.CancelledBy)
