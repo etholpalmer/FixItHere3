@@ -146,10 +146,20 @@ let mapAll (app: WebApplication) =
                     do! hub.ProviderUpdated dto
                     return okJson dto })) |> ignore
 
-    app.MapPost("/jobs", Func<CreateJobRequest, JobService, System.Threading.Tasks.Task<IResult>>(
-        fun req svc -> task {
-            let! dto = svc.Create req
-            return okJson dto })) |> ignore
+    app.MapPost("/jobs",
+        Func<CreateJobRequest, JobService, Clock.DemoClockService, System.Threading.Tasks.Task<IResult>>(
+            fun req svc clock -> task {
+                // An unknown slot is a 400, not a silent fallback to "as soon as
+                // possible": defaulting would turn a typo into a job booked
+                // twelve minutes out, which is a wrong answer wearing the shape
+                // of a right one.
+                match BookingSlot.tryResolve req.ScheduleChoice (clock.Now()) with
+                | None ->
+                    return err 400 (sprintf "Unknown schedule '%s'. Expected one of: %s"
+                                        req.ScheduleChoice (String.Join(", ", BookingSlot.options)))
+                | Some startsAt ->
+                    let! dto = svc.Create req startsAt
+                    return okJson dto })) |> ignore
 
     app.MapGet("/jobs", Func<AppDb, Nullable<int>, Nullable<int>, IResult>(
         fun db customerId providerId ->

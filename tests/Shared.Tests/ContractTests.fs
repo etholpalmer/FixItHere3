@@ -197,3 +197,49 @@ let ``no-show is reachable only from Scheduled`` () =
     Assert.Equal(Ok ProviderNoShow, StateMachine.transition Scheduled MarkNoShow)
     for s in [ EnRoute; Arrived; InProgress; Completed; Closed; Cancelled ] do
         Assert.True(StateMachine.transition s MarkNoShow |> Result.isError)
+
+// ----------------------------------------------------------- BookingSlot ----
+
+[<Fact>]
+let ``every offered slot resolves, and nothing else does`` () =
+    // The list and the resolver are the same contract seen twice. An option
+    // added to one without the other books a job at a time nobody chose.
+    for label in BookingSlot.options do
+        Assert.True((BookingSlot.tryResolve label now).IsSome, label)
+    Assert.True((BookingSlot.tryResolve "whenever" now).IsNone)
+    Assert.True((BookingSlot.tryResolve "" now).IsNone)
+
+[<Fact>]
+let ``"Now" leaves time for someone to actually travel`` () =
+    // An instant arrival reads as fake faster than a slow one reads as broken.
+    let at = (BookingSlot.tryResolve "Now" now).Value
+    Assert.Equal(now + BookingSlot.asapLead, at)
+    Assert.True(at > now)
+
+[<Property>]
+let ``no slot ever resolves into the past`` (hoursFromEpoch: int) =
+    let demoNow = DemoClock.epoch.AddHours(float (abs hoursFromEpoch % 2000))
+    BookingSlot.options
+    |> List.forall (fun label ->
+        match BookingSlot.tryResolve label demoNow with
+        | Some at -> at > demoNow
+        | None -> false)
+
+[<Fact>]
+let ``Saturday means the next one, never today`` () =
+    // Booking a slot in the past is worse than booking it a week out.
+    let saturday = DateTimeOffset(2026, 1, 3, 14, 0, 0, TimeSpan.Zero)
+    Assert.Equal(DayOfWeek.Saturday, saturday.DayOfWeek)
+    let at = (BookingSlot.tryResolve "Saturday morning" saturday).Value
+    Assert.Equal(DayOfWeek.Saturday, at.DayOfWeek)
+    Assert.True(at > saturday)
+    // From the epoch (a Thursday) it is two days out, not nine.
+    let fromEpoch = (BookingSlot.tryResolve "Saturday morning" DemoClock.epoch).Value
+    Assert.Equal(DateTimeOffset(2026, 1, 3, 9, 0, 0, TimeSpan.Zero), fromEpoch)
+
+[<Fact>]
+let ``a resolved slot describes itself in human terms`` () =
+    let today = DemoClock.epoch.AddHours 15.0
+    Assert.StartsWith("Today, ", BookingSlot.describe today DemoClock.epoch)
+    Assert.StartsWith("Tomorrow, ", BookingSlot.describe (DemoClock.epoch.AddDays 1.0) DemoClock.epoch)
+    Assert.StartsWith("Saturday, ", BookingSlot.describe (DemoClock.epoch.AddDays 2.0) DemoClock.epoch)

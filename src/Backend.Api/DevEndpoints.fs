@@ -16,6 +16,7 @@ open FixItHere.Backend.Services
 type StartDemoRequest = { CustomerId: int; ProviderId: int }
 
 let private okJson (data: 't) = Results.Json(Envelope.ok data)
+let private err code (msg: string) = Results.Json(Envelope.fail msg, statusCode = code)
 
 /// Scripted demo timeline. Runs on a background task with its own DI scope.
 let private runTimeline (sp: IServiceProvider) (jobId: int) =
@@ -95,15 +96,35 @@ let mapAll (app: WebApplication) =
             do! hub.ClockUpdated (Clock.toDto restarted DateTimeOffset.UtcNow)
             return okJson "reset" })) |> ignore
 
+    /// Pull a seeded job into the live demo.
+    ///
+    /// Seeded jobs are untracked so an accelerated run does not march demo time
+    /// past thirty grace windows and fire thirty no-show notifications in a
+    /// row. This is the escape hatch the plan required alongside that flag: the
+    /// operator picks the one job the story needs and opts it in.
+    app.MapPost("/dev/job/{id}/track",
+        Func<int, AppDb, IBroadcaster, Task<IResult>>(fun id db hub -> task {
+            match db.Jobs.SingleOrDefault(fun j -> j.Id = id) |> Option.ofObj with
+            | None -> return err 404 (sprintf "Job %d not found" id)
+            | Some job ->
+                let updated = { job with IsDemoTracked = true }
+                db.Entry(job).CurrentValues.SetValues(updated)
+                db.SaveChanges() |> ignore
+                let dto = Services.toJobDto db updated
+                do! hub.JobUpdated dto
+                return okJson dto })) |> ignore
+
     app.MapPost("/dev/demo/start",
         Func<StartDemoRequest, JobService, AppDb, IServiceProvider, Task<IResult>>(
             fun req svc db sp -> task {
                 let prov = db.Providers.Single(fun p -> p.Id = req.ProviderId)
                 let cust = db.Customers.Single(fun c -> c.Id = req.CustomerId)
+                let clock = sp.GetRequiredService<Clock.DemoClockService>()
                 let! dto =
                     svc.Create
                         { CustomerId = cust.Id; ProviderId = prov.Id; ServiceId = prov.ServiceId
                           ScheduleChoice = "Now"; Lat = cust.Lat; Lng = cust.Lng
                           Address = cust.Address }
+                        (clock.Now() + BookingSlot.asapLead)
                 runTimeline sp dto.Id |> ignore   // fire-and-forget scripted timeline
                 return okJson dto })) |> ignore

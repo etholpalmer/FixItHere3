@@ -77,12 +77,37 @@ let run (db: AppDb) =
           Vehicle = vehicle; PhotoUrl = sprintf "/avatar/provider/%d.svg" (i + 1) })) |> ignore
     db.SaveChanges() |> ignore
 
-    let customers = db.Customers.Local |> Seq.toArray
-    let provs = db.Providers.Local |> Seq.toArray
+    // Ordered by Id, not by change-tracker order. `DbSet.Local` is a LocalView
+    // over the change tracker and makes no guarantee about enumeration order,
+    // so indexing into it made "customer 0" mean whatever EF happened to yield
+    // — which silently handed the demo login's imminent job to someone else.
+    let customers = db.Customers.Local |> Seq.sortBy (fun c -> c.Id) |> Seq.toArray
+    let provs = db.Providers.Local |> Seq.sortBy (fun p -> p.Id) |> Seq.toArray
     let svcNameOf serviceId =
         (db.Services.Local |> Seq.find (fun sv -> sv.Id = serviceId)).Name
-    let mkJob i state =
-        let c = customers.[i % customers.Length]
+    // Demo time starts at the epoch, so the sign of a job's offset is now
+    // load-bearing. Every seeded job used to sit at `Epoch + i hours`, which
+    // put fifty *Closed* jobs in the future the moment the clock was anchored
+    // there — a completed job scheduled for tomorrow is a louder tell than the
+    // stale dates this replaced.
+    let historyAt i = DateTimeOffset.Parse(Epoch).AddHours(float -(6 + i * 7))
+
+    /// Minutes past the epoch for the k-th upcoming job. The first three are
+    /// deliberately imminent, and because pending jobs are handed to customers
+    /// in the same order, the soonest belongs to John Reyes — the demo login.
+    /// A countdown has to be visibly ticking the second the app opens, without
+    /// the operator touching the console first.
+    let upcomingAt k =
+        let minutes =
+            match k with
+            | 0 -> 8.0
+            | 1 -> 25.0
+            | 2 -> 55.0
+            | _ -> 60.0 * float (k - 2)
+        DateTimeOffset.Parse(Epoch).AddMinutes minutes
+
+    let mkJob i state (customerIndex: int) (startsAt: DateTimeOffset) =
+        let c = customers.[customerIndex % customers.Length]
         let p = provs.[(i * 3) % provs.Length]
         { Id = 0; CustomerId = c.Id; ProviderId = p.Id; ServiceId = p.ServiceId
           State = state
@@ -94,8 +119,8 @@ let run (db: AppDb) =
               let rate = ServiceRate.forService (svcNameOf p.ServiceId)
               let jitter = rate.TypicalMinutes * (80 + rng.Next(0, 9) * 5) / 100
               ServiceRate.total rate jitter
-          ScheduledFor = DateTimeOffset.Parse(Epoch).AddHours(float i).ToString("o")
-          PromisedStart = DateTimeOffset.Parse(Epoch).AddHours(float i).ToString("o")
+          ScheduledFor = startsAt.ToString("o")
+          PromisedStart = startsAt.ToString("o")
           ProposedStart = ""; ProposedBy = ""
           ProposalReason = ""; ProposalExpiresAt = ""
           // Seeded jobs populate lists; they are not what the demo drives. True
@@ -104,8 +129,12 @@ let run (db: AppDb) =
           Lat = c.Lat; Lng = c.Lng
           Address = c.Address }
     // 50 finished (alternate Completed/Closed), 30 pending
-    let finished = [ for i in 0 .. 49 -> mkJob i (if i % 2 = 0 then "Closed" else "Completed") ]
-    let pending  = [ for i in 50 .. 79 -> mkJob i "Scheduled" ]
+    let finished =
+        [ for i in 0 .. 49 -> mkJob i (if i % 2 = 0 then "Closed" else "Completed") i (historyAt i) ]
+    let pending =
+        [ for i in 50 .. 79 ->
+            let k = i - 50
+            mkJob i "Scheduled" k (upcomingAt k) ]
     db.Jobs.AddRange(finished @ pending) |> ignore
     db.SaveChanges() |> ignore
 
@@ -118,10 +147,15 @@ let run (db: AppDb) =
           Stars = 3 + rng.Next(0, 3); Comment = comments.[rng.Next(comments.Length)]
           // Reviews are dated relative to the fixed Epoch, so the seed stays
           // byte-identical while each review still carries a plausible date.
-          CreatedAt = DateTimeOffset.Parse(Epoch).AddDays(float -(j.Id % 60)).ToString("o") })) |> ignore
+          // Dated to the job it reviews, an hour after the work. A review that
+          // predates its own job is a detail nobody looks for until they do.
+          CreatedAt = DateTimeOffset.Parse(j.ScheduledFor).AddHours(2.0).ToString("o") })) |> ignore
 
     db.Messages.AddRange(doneJobs |> List.truncate 20 |> List.map (fun j ->
         { Id = 0; JobId = j.Id; SenderId = j.CustomerId; SenderRole = "Customer"
           Text = "Hi, see you soon!"; PhotoBase64 = null
-          SentAt = Epoch; Seen = true })) |> ignore
+          // Sent shortly before the job, not at a shared constant instant:
+          // twenty conversations all stamped 12:00 AM is a tell.
+          SentAt = DateTimeOffset.Parse(j.ScheduledFor).AddMinutes(-20.0).ToString("o")
+          Seen = true })) |> ignore
     db.SaveChanges() |> ignore

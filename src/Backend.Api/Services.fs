@@ -1,6 +1,7 @@
 module FixItHere.Backend.Services
 
 open System.Linq
+open System
 open System.Threading.Tasks
 open FixItHere.Shared
 open FixItHere.Shared.Dtos
@@ -72,7 +73,10 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                     return Ok dto
         }
 
-    member _.Create (req: CreateJobRequest) : Task<JobDto> =
+    /// `startsAt` is resolved by the caller against the demo clock rather than
+    /// read from the request: the service has no clock, and the label ("Now")
+    /// is the customer's word for a time, not the time itself.
+    member _.Create (req: CreateJobRequest) (startsAt: DateTimeOffset) : Task<JobDto> =
         task {
             let prov = db.Providers.Single(fun p -> p.Id = req.ProviderId)
             // The app cannot know the customer's street address — it only has a
@@ -91,8 +95,8 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                   // Priced from the trade rather than a flat rate: a plumbing
                   // call and a house clean costing the same is a tell.
                   Price = ServiceRate.quote svcName
-                  ScheduledFor = req.ScheduleChoice
-                  PromisedStart = req.ScheduleChoice
+                  ScheduledFor = startsAt.ToString "o"
+                  PromisedStart = startsAt.ToString "o"
                   ProposedStart = ""; ProposedBy = ""
                   ProposalReason = ""; ProposalExpiresAt = ""
                   // Booked in-session, so this one *is* the demo.

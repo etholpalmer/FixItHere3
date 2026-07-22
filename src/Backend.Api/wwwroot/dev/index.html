@@ -705,7 +705,18 @@ function renderJobs(jobs) {
 
     const svc = document.createElement("div");
     svc.className = "job-svc";
-    svc.textContent = j.serviceName;
+    /* The promised time relative to *demo* now, not the browser's clock — the
+       operator's whole job is spotting when the phones and the world disagree,
+       so the console has to be reading the same world they are.
+
+       Only states where an arrival is still pending get a countdown. A job
+       that has already been worked is not "349h late"; its scheduled time
+       being in the past is the correct shape of history. */
+    const AWAITING_ARRIVAL = ["Scheduled", "EnRoute"];
+    const when = !j.promisedStart ? ""
+      : AWAITING_ARRIVAL.includes(j.state) ? relativeToDemo(j.promisedStart)
+      : new Date(j.promisedStart).toISOString().slice(0, 16).replace("T", " ");
+    svc.textContent = when ? `${j.serviceName} · ${when}` : j.serviceName;
 
     const acts = document.createElement("div");
     acts.className = "transitions";
@@ -715,6 +726,19 @@ function renderJobs(jobs) {
       b.setAttribute("aria-label", `${t} job ${j.id}`);
       b.addEventListener("click", () => transition(j.id, t));
       acts.append(b);
+    }
+
+    /* Seeded jobs are untracked so an accelerated run does not fire thirty
+       no-show notifications at once. This opts one in when the story needs it. */
+    if (!j.isDemoTracked) {
+      const track = document.createElement("button");
+      track.textContent = "track";
+      track.setAttribute("aria-label", `Pull job ${j.id} into the live demo`);
+      track.addEventListener("click", async () => {
+        await api("POST", `/dev/job/${j.id}/track`);
+        log(`Job #${j.id} pulled into the live demo`, "note");
+      });
+      acts.append(track);
     }
 
     card.append(head, parties, svc, acts);
@@ -777,11 +801,18 @@ let activeJobs = [];
 async function refreshJobs() {
   const jobs = await api("GET", "/jobs");
   if (!jobs) return;
-  // Newest first: the seed leaves ~56 non-terminal jobs, so the one the operator
-  // just created (or Start demo just spun up) would otherwise be last in the list.
+  /* Ordered by what needs the operator, not by id.
+     Work already underway first, then upcoming arrivals soonest-first, then
+     jobs waiting only on payment. Sorting the whole list by promised time
+     alone put seeded *Completed* jobs on top — their arrival is legitimately
+     in the past, so they win a soonest-first race permanently. */
+  const RANK = { EnRoute: 0, Arrived: 0, InProgress: 0, Scheduled: 1, Completed: 2 };
   const active = jobs
     .filter(j => !["Closed", "Cancelled"].includes(j.state))
-    .sort((a, b) => b.id - a.id);
+    .sort((a, b) =>
+      (RANK[a.state] ?? 3) - (RANK[b.state] ?? 3) ||
+      (new Date(a.promisedStart) - new Date(b.promisedStart)) ||
+      (b.id - a.id));
   renderJobs(active);
   activeJobs = active;
 
@@ -920,6 +951,21 @@ function demoNow() {
   if (!clock.running) return new Date(clock.anchorDemo);
   const realElapsed = (Date.now() - new Date(clock.anchorReal).getTime()) / 1000;
   return new Date(new Date(clock.anchorDemo).getTime() + realElapsed * clock.rate * 1000);
+}
+
+/* "in 8:04" / "3:12 late" against demo time. Mirrors Format.countdown in
+   Shared so the console and the two phones read the same. */
+function relativeToDemo(iso) {
+  const now = demoNow();
+  if (!now) return "";
+  const ms = new Date(iso).getTime() - now.getTime();
+  const abs = Math.abs(ms);
+  const h = Math.floor(abs / 3600000);
+  const m = Math.floor((abs % 3600000) / 60000);
+  const sec = Math.floor((abs % 60000) / 1000);
+  const body = h >= 1 ? `${h}h ${String(m).padStart(2, "0")}m`
+                      : `${Math.floor(abs / 60000)}:${String(sec).padStart(2, "0")}`;
+  return ms < 0 ? `${body} late` : `in ${body}`;
 }
 
 function paintClock() {
