@@ -42,9 +42,17 @@ module Countdown =
         elif remaining <= soonWithin then Urgency.Soon
         else Urgency.Calm
 
-    let private at (label: string) (deadline: DateTimeOffset) (demoNow: DateTimeOffset) =
+    /// Two labels, because a deadline reads differently once it has passed.
+    ///
+    /// Composing one sign-blind label with a value that appends "late" produced
+    /// "Arriving in 3:06 late" on the customer's Home screen — caught by
+    /// looking at the running app, not by any test. The value is always the
+    /// absolute duration; the *label* carries the direction.
+    let private at (ahead: string) (behind: string) (deadline: DateTimeOffset) (demoNow: DateTimeOffset) =
         let remaining = deadline - demoNow
-        { Label = label; Value = Format.countdown remaining; Urgency = urgencyOf remaining }
+        { Label = (if remaining < TimeSpan.Zero then behind else ahead)
+          Value = Format.countdown (remaining.Duration())
+          Urgency = urgencyOf remaining }
 
     /// A live proposal outranks whatever else the job is doing, for both
     /// parties: it has its own deadline, and letting it expire unanswered is
@@ -52,7 +60,7 @@ module Countdown =
     let private pending (r: Reschedule) (labelFor: ActorRole -> string) (demoNow: DateTimeOffset) =
         r.Pending
         |> Option.map (fun p ->
-            { at (labelFor p.By) p.ExpiresAt demoNow with
+            { at (labelFor p.By) "Proposal expired" p.ExpiresAt demoNow with
                 // Always urgent regardless of the clock: an unanswered question
                 // is not a calm state even with four minutes left on it.
                 Urgency = Urgency.Urgent })
@@ -75,10 +83,10 @@ module Countdown =
         match state with
         | Scheduled ->
             if demoNow >= Reschedule.noShowDeadline r then
-                Some { Label = "Your provider has not arrived"
-                       Value = Format.countdown (r.PromisedStart - demoNow)
+                Some { Label = "Your provider never arrived — overdue by"
+                       Value = Format.countdown (demoNow - r.PromisedStart)
                        Urgency = Urgency.Overdue }
-            else Some (at "Arriving in" r.PromisedStart demoNow)
+            else Some (at "Arriving in" "Late by" r.PromisedStart demoNow)
         | EnRoute ->
             match etaMinutes with
             | Some mins ->
@@ -86,9 +94,10 @@ module Countdown =
                 // The honest number is the later of the two: a provider who is
                 // already behind does not become on time by driving fast.
                 if arrival > r.PromisedStart.AddMinutes 1.0 then
-                    Some { at "Arriving in" arrival demoNow with Urgency = Urgency.Overdue }
-                else Some (at "Arriving in" arrival demoNow)
-            | None -> Some (at "Arriving in" r.PromisedStart demoNow)
+                    // Will arrive, but not by the time that was agreed.
+                    Some { at "Arriving in" "Late by" arrival demoNow with Urgency = Urgency.Overdue }
+                else Some (at "Arriving in" "Late by" arrival demoNow)
+            | None -> Some (at "Arriving in" "Late by" r.PromisedStart demoNow)
         | Arrived | InProgress | Completed | Closed | Cancelled | ProviderNoShow -> None
 
     /// What the provider has to act on.
@@ -112,18 +121,16 @@ module Countdown =
                 travelKm
                 |> Option.map (fun km -> Travel.departBy r.PromisedStart km)
                 |> Option.defaultValue r.PromisedStart
-            if demoNow < departBy then Some (at "Leave in" departBy demoNow)
+            if demoNow < departBy then Some (at "Leave in" "Should have left" departBy demoNow)
             elif demoNow < r.PromisedStart then
-                Some { at "Leave now — due in" r.PromisedStart demoNow with Urgency = Urgency.Urgent }
+                Some { at "Leave now — due in" "Due" r.PromisedStart demoNow with Urgency = Urgency.Urgent }
             else
                 Some { Label = "Late — reportable as a no-show in"
-                       Value = Format.countdown (Reschedule.noShowDeadline r - demoNow)
+                       Value = Format.countdown ((Reschedule.noShowDeadline r - demoNow).Duration())
                        Urgency = Urgency.Overdue }
-        | EnRoute -> Some (at "Due in" r.PromisedStart demoNow)
+        | EnRoute -> Some (at "Due in" "Overdue by" r.PromisedStart demoNow)
         | Arrived | InProgress | Completed | Closed | Cancelled | ProviderNoShow -> None
 
-    /// Compact form for a list row: "in 8:04" / "8:04 late".
-    let inline compact (c: Countdown) =
-        match c.Urgency with
-        | Urgency.Overdue -> c.Value
-        | _ -> "in " + c.Value
+    /// "Arriving in 8:04" / "Late by 3:06" — the label already carries the
+    /// direction, so a row never has to re-derive it.
+    let inline oneLine (c: Countdown) = sprintf "%s %s" c.Label c.Value

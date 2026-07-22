@@ -495,3 +495,30 @@ let ``urgency only ever escalates as demo time advances`` (aheadSeed: int) (step
     match earlier, later with
     | Some a, Some b -> rank b.Urgency >= rank a.Urgency
     | _ -> true
+
+[<Fact>]
+let ``a passed deadline is worded as passed, not as an arrival with a suffix`` () =
+    // Caught on the running app, not by a test: the customer's Home screen read
+    // "Arriving in 3:06 late", because one sign-blind label was composed with a
+    // value that appended "late". The label carries direction now.
+    let r = booking 8.0
+    let overdue = mustHave (Countdown.forCustomer Scheduled r None (DemoClock.epoch.AddMinutes 11.0))
+    Assert.Equal(Urgency.Overdue, overdue.Urgency)
+    Assert.DoesNotContain("Arriving in", overdue.Label)
+    // The value is a bare duration; no phrasing leaks into it from either side.
+    Assert.DoesNotContain("late", overdue.Value)
+    Assert.DoesNotContain("-", overdue.Value)
+    Assert.Equal("Late by 3:00", Countdown.oneLine overdue)
+
+[<Property>]
+let ``no countdown ever reads as both directions at once`` (aheadSeed: int) (nowSeed: int) =
+    // The general form of the same defect: whatever the sign, exactly one
+    // direction may appear in the rendered line.
+    let r = booking (1.0 + float (abs aheadSeed % 60))
+    let now = DemoClock.epoch.AddMinutes(float (abs nowSeed % 120))
+    [ Countdown.forCustomer Scheduled r None now
+      Countdown.forProvider Scheduled r (Some 8.0) now ]
+    |> List.choose id
+    |> List.forall (fun c ->
+        let line = (Countdown.oneLine c).ToLowerInvariant()
+        not (line.Contains "arriving in" && line.Contains "late"))
