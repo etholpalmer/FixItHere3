@@ -50,9 +50,9 @@ let view (model: Model) (jobId: int) =
         // ---- header: who you are talking to, and whether they are there ----
         (Grid(coldefs = [ Auto; Star ], rowdefs = [ Auto; Auto ]) {
             Button("‹", GoBack)
-                .font(size = 28.)
+                .font(size = Theme.Font.title1)
                 .textColor(Theme.brand)
-                .width(44.).height(44.)          // HIG minimum touch target
+                .width(Theme.touchTarget).height(Theme.touchTarget)
                 .gridColumn(0).gridRowSpan(2)
             Label(title)
                 .font(size = 17., attributes = FontAttributes.Bold)
@@ -117,7 +117,7 @@ let view (model: Model) (jobId: int) =
         (Grid(coldefs = [ Auto; Star; Auto ], rowdefs = [ Auto ]) {
             Button("📷", PickAndSendPhoto jobId)
                 .font(size = 20.)
-                .width(44.).height(44.)
+                .width(Theme.touchTarget).height(Theme.touchTarget)
                 .gridColumn(0)
 
             // The field is the reason this row exists, so it takes the Star
