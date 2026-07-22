@@ -14,6 +14,7 @@
     <Compile Include="EndpointTests.fs" />
     <Compile Include="DevEndpointTests.fs" />
     <Compile Include="DevConsoleTests.fs" />
+    <Compile Include="ClockTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

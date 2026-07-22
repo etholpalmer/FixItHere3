@@ -31,6 +31,14 @@ seeded customers follow the same `first.last@domain` shape
 Use the /dev console as the "provider side" to accept/drive jobs, or press
 Start Demo there for the fully scripted flow.
 
+The console also owns the **demo clock**. The world starts at 2026-01-01 and
+runs at 1x; pause it to talk over a beat, run it at 60x to compress a half-hour
+wait into thirty seconds, or skip to two minutes before the next promised
+arrival to re-stage a beat on demand. The server holds the clock and pushes the
+*map* (anchor + rate + running) rather than the time, so every client
+extrapolates locally — nothing polls, and no client owns a timer that a moved
+deadline could strand.
+
 Android emulator: the app auto-targets http://10.0.2.2:5162.
 
 ## Run the Provider app (iOS Simulator)

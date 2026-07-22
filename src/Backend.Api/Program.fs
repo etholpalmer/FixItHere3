@@ -16,6 +16,9 @@ builder.Services.AddDbContext<AppDb>(fun opts ->
 builder.Services.AddSignalR() |> ignore
 builder.Services.AddScoped<IBroadcaster, SignalRBroadcaster>() |> ignore
 builder.Services.AddScoped<JobService>() |> ignore
+// Singleton: there is exactly one demo world, and every request must agree on
+// what time it is in that world.
+builder.Services.AddSingleton<FixItHere.Backend.Clock.DemoClockService>() |> ignore
 
 let app = builder.Build()
 

@@ -41,6 +41,26 @@ let private toProviderDto (db: AppDb) (p: Provider) : ProviderDto =
 
 let mapAll (app: WebApplication) =
 
+    // ---- Demo clock -------------------------------------------------------
+    // GET is the resync path, and it exists for two distinct moments: app
+    // startup, and every SignalR reconnect. A client that missed a
+    // ClockUpdated while disconnected cannot reconstruct the map from the
+    // ticks it did not receive — it has to ask.
+    app.MapGet("/demo/clock", Func<Clock.DemoClockService, IResult>(fun clock ->
+        okJson (Clock.toDto clock.Current DateTimeOffset.UtcNow))) |> ignore
+
+    app.MapPost("/demo/clock",
+        Func<SetClockRequest, Clock.DemoClockService, IBroadcaster, System.Threading.Tasks.Task<IResult>>(
+            fun req clock hub -> task {
+                match Clock.interpret req with
+                | Error msg -> return err 400 msg
+                | Ok mutate ->
+                    let updated = clock.Apply mutate
+                    let dto = Clock.toDto updated DateTimeOffset.UtcNow
+                    do! hub.ClockUpdated dto
+                    return okJson dto })) |> ignore
+
+
     // Demo auth (see Auth.fs): real *shape* and real failure modes, no security.
     // Distinguishing "unknown account" from "wrong password" is what makes a
     // sign-in feel real when someone tests it; both are 401 to the user.

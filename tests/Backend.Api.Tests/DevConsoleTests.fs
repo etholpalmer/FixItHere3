@@ -31,3 +31,7 @@ let ``dev console page is served in development`` () =
     Assert.Contains("id=\"map\"", body)
     Assert.Contains("id=\"jobs\"", body)
     Assert.Contains("id=\"log\"", body)
+    // The console mirrors the demo clock; without these the operator has no
+    // readout and the pause/rate/jump controls the plan's asides depend on.
+    Assert.Contains("id=\"clockNow\"", body)
+    Assert.Contains("id=\"rateButtons\"", body)

@@ -10,6 +10,7 @@
     <Compile Include="Seed.fs" />
     <Compile Include="Services.fs" />
     <Compile Include="Hub.fs" />
+    <Compile Include="Clock.fs" />
     <Compile Include="Endpoints.fs" />
     <Compile Include="DevEndpoints.fs" />
     <Compile Include="Program.fs" />

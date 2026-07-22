@@ -83,11 +83,17 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) =
     } :> Task
 
 let mapAll (app: WebApplication) =
-    app.MapPost("/dev/reset", Func<AppDb, IResult>(fun db ->
-        db.Database.EnsureDeleted() |> ignore
-        db.Database.EnsureCreated() |> ignore
-        FixItHere.Backend.Seed.run db
-        okJson "reset")) |> ignore
+    app.MapPost("/dev/reset",
+        Func<AppDb, Clock.DemoClockService, IBroadcaster, Task<IResult>>(fun db clock hub -> task {
+            db.Database.EnsureDeleted() |> ignore
+            db.Database.EnsureCreated() |> ignore
+            FixItHere.Backend.Seed.run db
+            // The clock resets *with* the seed, never separately. Reseeding
+            // re-anchors every job at the epoch; leaving the clock hours ahead
+            // would make the whole freshly-reset list instantly overdue.
+            let restarted = clock.Reset()
+            do! hub.ClockUpdated (Clock.toDto restarted DateTimeOffset.UtcNow)
+            return okJson "reset" })) |> ignore
 
     app.MapPost("/dev/demo/start",
         Func<StartDemoRequest, JobService, AppDb, IServiceProvider, Task<IResult>>(

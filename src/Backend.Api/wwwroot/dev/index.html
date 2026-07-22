@@ -191,6 +191,31 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .btn-wide { width: 100%; }
 
+/* The clock readout is the console's only large number: an operator glances at
+   it mid-sentence, so it has to be legible without being read. Tabular figures
+   stop the panel twitching as the seconds roll over. */
+.clock-now {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.clock-now[data-running="false"] { color: var(--faint); }
+.clock-now[data-running="false"]::after {
+  content: " paused";
+  font-size: var(--t-xs);
+  letter-spacing: 0;
+  vertical-align: 0.55em;
+}
+#rateButtons button[aria-pressed="true"] {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--on-brand);
+  font-weight: 600;
+}
+
 /* ---------- layout ---------- */
 
 .layout {
@@ -457,6 +482,25 @@ input::placeholder { color: var(--faint); }
 <main class="layout">
 
   <aside class="rail" aria-label="Controls">
+    <section>
+      <h2>Demo clock</h2>
+      <p class="clock-now" id="clockNow" aria-live="off">--:--:--</p>
+      <p class="hint" id="clockDate">&nbsp;</p>
+      <div class="row row--tight">
+        <button id="btnClockToggle" class="btn-wide">Pause</button>
+      </div>
+      <div class="row row--tight" id="rateButtons" role="group" aria-label="Clock rate">
+        <button data-rate="1">1&times;</button>
+        <button data-rate="10">10&times;</button>
+        <button data-rate="60">60&times;</button>
+        <button data-rate="120">120&times;</button>
+      </div>
+      <p class="hint">Jumping always resumes &mdash; a countdown frozen at the target reads as a hung app.</p>
+      <div class="row row--tight">
+        <button class="btn-wide" id="btnJumpSoon">Skip to T&minus;2 min on next job</button>
+      </div>
+    </section>
+
     <section>
       <h2>Personas</h2>
       <div class="field">
@@ -726,6 +770,10 @@ async function refresh() {
   await refreshJobs();
 }
 
+/* Hoisted so the clock's "skip to T−2 min" can find the soonest promised
+   arrival without re-fetching. */
+let activeJobs = [];
+
 async function refreshJobs() {
   const jobs = await api("GET", "/jobs");
   if (!jobs) return;
@@ -735,6 +783,7 @@ async function refreshJobs() {
     .filter(j => !["Closed", "Cancelled"].includes(j.state))
     .sort((a, b) => b.id - a.id);
   renderJobs(active);
+  activeJobs = active;
 
   topActiveJob = active[0] || null;
   $("routeTarget").textContent = topActiveJob
@@ -857,6 +906,69 @@ document.querySelectorAll("#routeButtons button").forEach(b => {
 const conn = new signalR.HubConnectionBuilder()
   .withUrl("/hub").withAutomaticReconnect().build();
 
+/* The demo clock, mirrored.
+
+   The server pushes the *map* (anchor + rate + running), never the time, so
+   this readout extrapolates against the browser's own wall clock at 4 Hz and
+   never polls. Same arithmetic as DemoClock.nowAt in Shared — if the console
+   invented its own the two would drift, and the console is where the operator
+   checks whether the phones are telling the truth. */
+let clock = null;
+
+function demoNow() {
+  if (!clock) return null;
+  if (!clock.running) return new Date(clock.anchorDemo);
+  const realElapsed = (Date.now() - new Date(clock.anchorReal).getTime()) / 1000;
+  return new Date(new Date(clock.anchorDemo).getTime() + realElapsed * clock.rate * 1000);
+}
+
+function paintClock() {
+  const now = demoNow();
+  const el = document.getElementById("clockNow");
+  if (!now) { el.textContent = "--:--:--"; return; }
+  el.textContent = now.toISOString().slice(11, 19);
+  el.dataset.running = String(clock.running);
+  document.getElementById("clockDate").textContent =
+    now.toISOString().slice(0, 10) + " · " + clock.rate + "×";
+  document.getElementById("btnClockToggle").textContent = clock.running ? "Pause" : "Resume";
+  for (const b of document.querySelectorAll("#rateButtons button"))
+    b.setAttribute("aria-pressed", String(Number(b.dataset.rate) === clock.rate));
+}
+
+/* 250 ms, not 1 s: at 60× a one-second tick advances demo time a full minute
+   and the readout visibly skips whole minutes at a time. */
+setInterval(paintClock, 250);
+
+async function setClock(action, rate, target) {
+  const r = await api("POST", "/demo/clock", { action, rate: rate || 0, target: target || "" });
+  if (r) { clock = r; paintClock(); }
+}
+
+async function loadClock() {
+  const r = await api("GET", "/demo/clock");
+  if (r) { clock = r; paintClock(); }
+}
+
+document.getElementById("btnClockToggle").onclick =
+  () => setClock(clock && clock.running ? "pause" : "resume");
+for (const b of document.querySelectorAll("#rateButtons button"))
+  b.onclick = () => setClock("rate", Number(b.dataset.rate));
+
+/* Re-stage a beat on demand: park demo time two minutes before the soonest
+   promised arrival that has not happened yet. */
+document.getElementById("btnJumpSoon").onclick = async () => {
+  const now = demoNow();
+  if (!now) return;
+  const upcoming = activeJobs
+    .filter(j => j.promisedStart && new Date(j.promisedStart) > now)
+    .sort((a, b) => new Date(a.promisedStart) - new Date(b.promisedStart))[0];
+  if (!upcoming) { log("No job is scheduled ahead of demo time.", "note"); return; }
+  const target = new Date(new Date(upcoming.promisedStart).getTime() - 120000);
+  await setClock("jump", 0, target.toISOString());
+  log(`Jumped to T−2 min on job #${upcoming.id}`, "note");
+};
+
+conn.on("ClockUpdated", c => { clock = c; paintClock(); });
 conn.on("JobUpdated", j => { log(`Job #${j.id} → ${j.state}`, "job"); refreshJobs(); });
 conn.on("MessageReceived", m => log(`#${m.jobId} ${m.senderName}: ${m.text}`, "msg"));
 conn.on("LocationUpdated", l => {
@@ -878,13 +990,14 @@ conn.onclose(() => setConn("down", "Disconnected"));
 const joinConsole = () => conn.invoke("JoinConsole").catch(e =>
   log(`Could not join console group — events will be missing: ${e.message}`, "error"));
 
-conn.onreconnected(() => { setConn("up", "Live"); joinConsole(); refresh(); });
+conn.onreconnected(() => { setConn("up", "Live"); joinConsole(); refresh(); loadClock(); });
 
 conn.start()
   .then(() => { setConn("up", "Live"); joinConsole(); log("Realtime connected", "note"); })
   .catch(e => { setConn("down", "Disconnected"); log(`Realtime failed — ${e.message}`, "error"); });
 
 refresh();
+loadClock();
 
 /* Leaflet sizes its tile grid to the container's layout at init. The panel
    changes width at both breakpoints, so observe the container rather than
