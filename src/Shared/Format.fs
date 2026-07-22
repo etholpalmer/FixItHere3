@@ -62,6 +62,13 @@ let duration (minutes: int) =
     elif minutes % 60 = 0 then sprintf "%dh" (minutes / 60)
     else sprintf "%dh %dm" (minutes / 60) (minutes % 60)
 
+/// "★4.8 (23)" — an honest zero. `count = 0` is not "zero stars", it is no
+/// ratings yet, and the two must never render the same: "★0.0 (0)" reads as a
+/// provider everyone gave up on, not one nobody has met.
+let rating (rating: float) (count: int) =
+    if count <= 0 then "New"
+    else sprintf "★%.1f (%d)" rating count
+
 /// "8:32" · "in 2h 14m" · "3:12 late". The only countdown renderer in the
 /// product: two independent `statusLine` implementations already drifted in
 /// this codebase, and a countdown that reads differently on the two phones

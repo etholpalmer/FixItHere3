@@ -30,3 +30,11 @@ let ``durations read as durations`` () =
     Assert.Equal("45m", Format.duration 45)
     Assert.Equal("2h", Format.duration 120)
     Assert.Equal("1h 30m", Format.duration 90)
+
+[<Fact>]
+let ``an unrated provider reads New, never zero stars`` () =
+    Assert.Equal("New", Format.rating 0.0 0)
+
+[<Fact>]
+let ``a rated provider renders stars and a count`` () =
+    Assert.Equal("★4.8 (23)", Format.rating 4.8 23)
