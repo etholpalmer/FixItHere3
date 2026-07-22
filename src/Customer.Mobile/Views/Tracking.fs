@@ -11,34 +11,32 @@ open FixItHere.Shared
 /// strings. The old version ended `| s -> s`, so a state without copy rendered
 /// its own enum name — the user would have read "ProviderNoShow".
 
-/// Memoised map HTML.
+/// Memoised map *source object*, not just its HTML.
 ///
-/// Both tracking screens built this by calling `MapHtml.render` *inside* the
-/// view function, and that WebView hosts its own SignalR connection. With a
-/// 250 ms countdown tick now re-running the view four times a second, a fresh
-/// string every render would mean Fabulous re-setting `Html` — reloading the
-/// map and reconnecting its hub four times a second, on the one screen the
-/// whole demo is watching.
+/// Caching the string was necessary and not sufficient: the view wrapped it in
+/// `HtmlWebViewSource(Html = ...)`, constructing a brand-new object on every
+/// render. With the 250 ms countdown pump that is four new sources a second,
+/// and Fabulous re-sets a property whose value is a different reference — so
+/// the WebView reloaded continuously and the map visibly flashed.
 ///
-/// Keyed on what the map actually depends on, so panning to a different job
-/// still rebuilds it. A dictionary rather than a single slot because a user can
-/// move between jobs and back.
+/// A reload also drops and re-opens the page's own SignalR connection, which is
+/// why "no hub churn" was the wrong thing to measure: the page came back faster
+/// than a dropped connection took to surface.
+///
+/// Handing back the same instance makes the diff a no-op. Keyed on what the map
+/// actually depends on, so moving to a different job still rebuilds it.
 module private MapCache =
-    let private cache = System.Collections.Generic.Dictionary<struct (float * float * int), string>()
+    let private cache =
+        System.Collections.Generic.Dictionary<struct (float * float * int), HtmlWebViewSource>()
 
-    let html (baseUrl: string) (lat: float) (lng: float) (providerId: int) =
+    let source (baseUrl: string) (lat: float) (lng: float) (providerId: int) =
         let key = struct (lat, lng, providerId)
         match cache.TryGetValue key with
         | true, v -> v
         | _ ->
-            let v = MapHtml.render baseUrl lat lng providerId
+            let v = HtmlWebViewSource(Html = MapHtml.render baseUrl lat lng providerId)
             cache[key] <- v
             v
-
-
-/// Urgency drives colour. A deadline that has passed must not look like one
-/// comfortably ahead — that is the entire reason `Countdown` carries a rank
-/// rather than just a string.
 let private urgencyColor (u: Urgency) =
     match u with
     | Urgency.Overdue -> Microsoft.Maui.Graphics.Color.FromRgb(0xB0, 0x2A, 0x2A)
@@ -82,7 +80,7 @@ let view (model: Model) (jobId: int) =
                     Label(sprintf "%s — %s (%s)" job.ProviderName job.ServiceName (Format.money job.Price))
                     Label(etaLine).font(size = 12.)
                 }).gridRow(0)
-                WebView(HtmlWebViewSource(Html = MapCache.html Config.baseUrl job.Lat job.Lng job.ProviderId)).gridRow(1)
+                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(1)
                 (HStack(spacing = 8.) {
                     Button("Call", StartFakeCall)
                     Button("Chat", Navigate (Chat job.Id))

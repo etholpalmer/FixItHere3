@@ -14,6 +14,19 @@ let builder = WebApplication.CreateBuilder()
 builder.Services.AddDbContext<AppDb>(fun opts ->
     opts.UseSqlite("Data Source=fixithere-demo.db") |> ignore) |> ignore
 builder.Services.AddSignalR() |> ignore
+// The in-app map is an HTML string loaded into a WebView, so its document has a
+// *null* origin — every call it makes to this backend is cross-origin. Without
+// a policy the browser blocked both the map's initial position fetch and
+// SignalR's negotiate, which is why the tracking screen never showed a moving
+// provider: the page was there, the connection never was.
+//
+// AllowAnyOrigin is correct here and only here: this backend serves a local
+// demo, holds no real credentials, and its only clients are two simulators and
+// a console on the same machine. AllowCredentials is deliberately NOT set —
+// that combination is the one browsers reject outright.
+builder.Services.AddCors(fun opts ->
+    opts.AddDefaultPolicy(fun p ->
+        p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod() |> ignore)) |> ignore
 builder.Services.AddScoped<IBroadcaster, SignalRBroadcaster>() |> ignore
 builder.Services.AddScoped<JobService>() |> ignore
 // Singleton: there is exactly one demo world, and every request must agree on
@@ -29,6 +42,9 @@ do
     db.Database.EnsureDeleted() |> ignore
     db.Database.EnsureCreated() |> ignore
     FixItHere.Backend.Seed.run db
+
+// Before any endpoint, so preflight is answered for all of them.
+app.UseCors() |> ignore
 
 app.MapHub<DemoHub>("/hub") |> ignore
 app.MapGet("/health", Func<string>(fun () -> "ok")) |> ignore

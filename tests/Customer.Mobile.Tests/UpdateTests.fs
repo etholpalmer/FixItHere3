@@ -64,6 +64,8 @@ let stubDeps : ApiDeps =
       GetGpsLocation = fun () -> Task.FromResult(Ok (43.65, -79.38))
       GetClock = fun () -> Task.FromResult(Ok ({ DemoNow = ""; AnchorDemo = ""; AnchorReal = ""
                                                  Rate = 1.0; Running = true } : DemoClockDto))
+      GetLocation = fun pid -> Task.FromResult(Ok ({ ProviderId = pid; Lat = 43.70; Lng = -79.40
+                                                     UpdatedAt = "" } : LocationDto))
       SendTyping = fun _ _ _ -> ()
       SendSeen = fun _ _ _ -> () }
 

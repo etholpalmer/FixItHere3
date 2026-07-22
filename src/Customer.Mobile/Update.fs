@@ -80,6 +80,11 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             | ProviderProfile providerId, _ ->
                 apiCmd (fun () -> deps.GetRatings providerId) ProfileRatingsLoaded
             | Home, Some s -> apiCmd (fun () -> deps.GetJobs s.UserId) JobsLoaded
+            | Tracking jobId, _ ->
+                // Seed the provider's position rather than waiting for a push.
+                match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
+                | Some j -> apiCmd (fun () -> deps.GetLocation j.ProviderId) HubLocationUpdated
+                | None -> Cmd.none
             | Chat jobId, _ -> apiCmd (fun () -> deps.GetMessages jobId) MessagesLoaded
             | Payment jobId, _ -> delayCmd 2000 (PaymentDelayDone jobId)
             | _ -> Cmd.none

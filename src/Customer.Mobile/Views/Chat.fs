@@ -38,9 +38,16 @@ let view (model: Model) (jobId: int) =
                     Label("provider is typing…")
             })
         )).gridRow(1)
-        (HStack(spacing = 8.) {
+        // A Grid, not an HStack. HStack gives every child its natural width, so
+        // the Entry collapsed to the width of its own text and there was
+        // physically nowhere to type. Star gives the field the leftover room and
+        // the two buttons only what they need.
+        (Grid(coldefs = [ Star; Auto; Auto ], rowdefs = [ Auto ]) {
             Entry(draftFor model.ChatDrafts jobId, fun t -> ChatDraftChanged (jobId, t))
+                .gridColumn(0)
             Button("Send", SendChatMessage (jobId, draftFor model.ChatDrafts jobId, null))
+                .gridColumn(1)
             Button("📷", PickAndSendPhoto jobId)
+                .gridColumn(2)
         }).gridRow(2)
     }).padding(12.)

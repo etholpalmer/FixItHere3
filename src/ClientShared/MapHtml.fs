@@ -19,6 +19,7 @@ let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) :
   :root {
     --brand: oklch(0.72 0.15 80);
     --ink: oklch(0.22 0.01 85);
+    --dest: oklch(0.55 0.17 255);
     --ring: oklch(1 0 0);
   }
   html, body, #map { margin: 0; height: 100%%; }
@@ -26,11 +27,13 @@ let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) :
   .leaflet-container { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .leaflet-control-attribution { font-size: 10px; opacity: 0.7; }
 
-  /* Destination: dark dot, white ring — a fixed reference point. */
+  /* Destination: blue, the convention for "you are here" on every map app the
+     audience has ever used. Dark-on-white read as a generic pin and, worse, sat
+     invisible under the amber provider marker whenever the two coincided. */
   .dest {
     width: 16px; height: 16px;
     border-radius: 50%%;
-    background: var(--ink);
+    background: var(--dest);
     border: 3px solid var(--ring);
     box-shadow: 0 1px 5px oklch(0.2 0 0 / 0.4);
   }
@@ -73,8 +76,23 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).a
 const destIcon = L.divIcon({ className: "", html: '<div class="dest"></div>', iconSize: [16, 16], iconAnchor: [8, 8] });
 const carIcon  = L.divIcon({ className: "", html: '<div class="car"></div>',  iconSize: [18, 18], iconAnchor: [9, 9] });
 
-L.marker(jobPos, { icon: destIcon }).addTo(map).bindPopup("You");
-const car = L.marker(jobPos, { icon: carIcon }).addTo(map);
+const dest = L.marker(jobPos, { icon: destIcon }).addTo(map).bindPopup("You");
+
+/* The provider marker is created but NOT added until a real position arrives.
+   It used to be initialised at jobPos, so before the first LocationUpdated both
+   markers occupied the same coordinate and the amber one painted over the blue
+   — the map showed a single dot and looked like it had lost the customer. */
+const car = L.marker(jobPos, { icon: carIcon });
+let carPlaced = false;
+
+/* Keep both dots in frame, and close in as they converge — the visual the whole
+   tracking screen exists to deliver. maxZoom stops a provider who is nearly
+   there from slamming the view to street level. */
+function frame() {
+  if (!carPlaced) { map.setView(jobPos, 13); return; }
+  map.fitBounds(L.latLngBounds([jobPos, car.getLatLng()]).pad(0.35),
+                { maxZoom: 16, animate: true, duration: 0.6 });
+}
 
 const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let target = null, current = null;
@@ -86,18 +104,32 @@ function step() {
   }
   requestAnimationFrame(step);
 }
-if (reduce) {
-  // Snap instead of easing; no continuous rAF loop.
-  car.setLatLng(jobPos);
-} else {
-  step();
-}
+if (!reduce) step();
 
 const conn = new signalR.HubConnectionBuilder().withUrl(baseUrl + "/hub").withAutomaticReconnect().build();
+function place(lat, lng) {
+  if (!carPlaced) {
+    car.setLatLng([lat, lng]).addTo(map);
+    current = [lat, lng];
+    carPlaced = true;
+  }
+  if (reduce) { car.setLatLng([lat, lng]); } else { target = [lat, lng]; }
+  frame();
+}
+
 conn.on("LocationUpdated", l => {
   if (l.providerId !== providerId) return;
-  if (reduce) { car.setLatLng([l.lat, l.lng]); } else { target = [l.lat, l.lng]; }
+  place(l.lat, l.lng);
 });
 conn.start();
-setTimeout(() => map.invalidateSize(), 400);
+
+/* Ask once on load rather than waiting for the provider to move. Without this
+   the map shows no provider at all until the next push, which on a Scheduled
+   job may be minutes away — the screen reads as broken rather than as waiting. */
+fetch(baseUrl + "/location?providerId=" + providerId)
+  .then(r => r.json())
+  .then(env => { if (env && env.success && env.data) place(env.data.lat, env.data.lng); })
+  .catch(() => {});
+
+setTimeout(() => { map.invalidateSize(); frame(); }, 400);
 </script></body></html>""" jobLat jobLng providerId baseUrl

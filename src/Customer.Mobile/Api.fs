@@ -33,5 +33,6 @@ let createDepsWith
       PickPhoto = pickPhoto
       GetGpsLocation = gpsLocation
       GetClock = fun () -> Http.getEnv http "/demo/clock"
+      GetLocation = fun providerId -> Http.getEnv http (sprintf "/location?providerId=%d" providerId)
       SendTyping = sendTyping
       SendSeen = sendSeen }

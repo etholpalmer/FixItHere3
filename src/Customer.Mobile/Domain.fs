@@ -182,6 +182,11 @@ type ApiDeps =
       /// while disconnected cannot rebuild the map from ticks it never got —
       /// it has to ask.
       GetClock: unit -> Task<Result<DemoClockDto, string>>
+      /// The provider's *current* position. Without this the app learns
+      /// positions only from live pushes, so a provider who has not moved since
+      /// launch never appears and the ETA line reads "Locating provider…"
+      /// forever — on a Scheduled job that can be the entire wait.
+      GetLocation: int -> Task<Result<LocationDto, string>>
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 
