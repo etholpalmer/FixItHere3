@@ -10,11 +10,39 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability)
+- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, and the demo pair that shared no job)
 
 ---
 
 ## Lessons
+
+### 2026-07-23 — Half of an invariant was designed and commented; the other half was arithmetic ("half-specified invariant")
+
+**Insight:** The whole product is two phones showing two sides of **one** job, and the seed gave the two prefilled demo accounts no live job in common. The reason is the interesting part: the pairing has two halves, and only one was ever specified. `mkJob` chose the customer from an explicit index — deliberate, with a comment saying "the soonest belongs to John Reyes — the demo login" — and chose the *provider* from `(i * 3) % provs.Length`, an expression written to spread work across a roster. Half the invariant was designed; the other half was whatever the arithmetic produced, and it produced GearHeads Mobile.
+
+**Discovery:** Not by testing — by the user stating it flatly: "John Reyes did not request anything from Mike's Plumbing. Therefore they will remain disconnected." Every seeded screen looked right in isolation, which is exactly why it survived a full acceptance walkthrough: the customer's Home was correct, the provider's Home was correct, and nothing on either screen refers to the other.
+
+**Design intent:** `(i * 3) % 20` is good code for what it was written for — 3 is coprime with 20, so finished jobs distribute evenly across the roster and no provider's review list repeats a customer. It was a *distribution* rule that silently also became an *identity* rule for the one job the demo opens on.
+
+**Impact:** The general form, and the thing to hunt for: **an invariant stated over a pair where only one side is pinned.** The comment is the tell — a comment asserting "this belongs to X" next to a computed Y is a claim about half a relationship. Whenever seed or fixture data must connect two named actors, assert the *join*, not each end: the test that now guards this reads the soonest scheduled job and checks both its customer and its provider, which is a claim no arithmetic can accidentally satisfy.
+
+**Active mitigation:** `the two prefilled logins share the soonest job` in [SeedTests.fs](tests/Backend.Api.Tests/SeedTests.fs) — mutation-checked (reverting the pin turns it red).
+
+**Related:** [Mistake: the two demo logins shared no live job](#2026-07-23--the-two-demo-logins-shared-no-live-job); [Test fixtures that dodge the production shape pass forever](#2026-07-19--test-fixtures-that-dodge-the-production-shape-pass-forever)
+
+---
+
+### 2026-07-23 — A fix that makes something transient can outrun the tool that verifies it
+
+**Insight:** This project leans on `xcrun simctl io … screenshot` as its answer to "rendering defects are invisible to a green suite". That technique has a floor: it cannot observe anything shorter-lived than a simulator round-trip. Fixing the persistent error bar gave it a ~7-second life, and three attempts to photograph it failed — each tap-then-screenshot cycle through the automation took longer than the bar now survives. The bug was easy to screenshot precisely *because* it was broken; the fix is not.
+
+**Discovery:** Trying to produce the same before/after evidence used for every other visual fix this session, and running out of clock each time.
+
+**Impact:** Two things follow. (1) When a change makes behaviour transient, decide the verification mechanism *before* implementing — a test that asserts the timer and its generation token is the right instrument, and a screenshot is not. (2) Report the difference honestly rather than letting "verified" cover both: in the commit that shipped this, the reset-resync half was verified live and the error-bar half by test only, and saying so is the difference between a journal that can be trusted and one that cannot. Absence of a bar in a late screenshot is not evidence it dismissed itself.
+
+**Related:** [A screenshot verifies the *installed* binary, not the source](#2026-07-22--a-screenshot-verifies-the-installed-binary-not-the-source); [Mistake: the error bar outlived the screen that produced it](#2026-07-23--the-error-bar-outlived-the-screen-that-produced-it)
+
+---
 
 ### 2026-07-23 — The restore path keeps forgetting what the login path does ("restore-path divergence")
 
@@ -488,6 +516,70 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 ---
 
 ## Mistakes & Fixes
+
+### 2026-07-23 — The two demo logins shared no live job
+
+**Symptom:** Reported directly: "Customer John Reyes did not request anything from Mike's Plumbing. Therefore they will remain disconnected." Confirmed against the running seed — John Reyes's only imminent job belonged to GearHeads Mobile; Mike's Plumbing's only upcoming job belonged to Jack O'Brien; their sole shared row was job 1, `Closed`, dated 2025-12-31.
+
+**Attempted:** No diagnosis needed once stated, but it explains a whole session of confusion beforehand: every attempt to drive a two-app scenario needed a *different* job on each phone, and that friction was repeatedly read as a test-setup annoyance rather than as the defect it was.
+
+**Root Cause:** `mkJob` pinned the customer by explicit index (deliberate, commented) and derived the provider from `(i * 3) % provs.Length` (a distribution rule, not an identity one). Half the pairing was specified; the other half was arithmetic — see the lesson below.
+
+**Fix:** `mkJob` takes the provider index explicitly; the soonest pending job pins it to provider 0. [Seed.fs](src/Backend.Api/Seed.fs). `cd1e4e5`. Verified live: both phones now open on the same job — customer *"Plumbing — Mike's Plumbing · Arriving in 7:39"*, provider *"Plumbing — John Reyes · Leave now — due in 7:31"*.
+
+**Prevention:** Assert the **join**, not each end. The new test reads the soonest scheduled job and checks both its customer and its provider against the two named demo logins.
+
+**Active mitigation:** `the two prefilled logins share the soonest job` in [SeedTests.fs](tests/Backend.Api.Tests/SeedTests.fs), mutation-checked. It also uses the colliding id shape the fixtures lesson asks for (customer 1 + provider 1).
+
+**Time Lost:** ~20 min to fix; considerably more spent earlier working around the symptom without recognising it.
+
+**Severity:** **High** — the two-sided moment is the thing the build exists to demonstrate, and as shipped it could not be reached without switching an account first. Invisible to every test and to a walkthrough of either app alone.
+
+**Related:** [Lesson: half-specified invariant](#2026-07-23--half-of-an-invariant-was-designed-and-commented-the-other-half-was-arithmetic-half-specified-invariant)
+
+---
+
+### 2026-07-23 — A reseed left every open app holding jobs that no longer existed
+
+**Symptom:** "Job 81 not found" on the customer's screen, after the two phones "began to diverge" — each describing a different world.
+
+**Attempted:** Checked the id against the running database first (`GET /jobs/81` → 404, and customer 1's list held ids 1, 40, 51, 71). That confirmed the client, not the server, was wrong.
+
+**Root Cause:** `/dev/reset` calls `EnsureDeleted()` + `EnsureCreated()` + reseed, which restarts the id sequences. Job 81 was a *booked* job; the fresh seed only creates 1–80. Every connected app kept its pre-reset job list, so acting on one 404s. The reset already broadcast `ClockUpdated` — the clock was resynced and the data was not, which is the whole bug in one line.
+
+**Fix:** New `IBroadcaster.DataReset`, broadcast from `/dev/reset` beside the clock signal; both apps drop Jobs/Messages/PaymentResult/Notices, land on Home via `Nav.resetTo`, and refetch. `25e3ddb`. Verified live: an app parked on a job's tracking screen returned to a freshly loaded Home on reset.
+
+**Prevention:** When an operator action changes what the server *is*, ask what every connected client now believes. The clock had that reasoning applied and the data did not, in the same function.
+
+**Time Lost:** ~40 min including the protocol change across nine files.
+
+**Severity:** Medium — operator-only trigger, but it produces two phones telling different stories mid-demo, which is the one thing this build cannot afford.
+
+**Related:** [Mistake: the error bar outlived the screen that produced it](#2026-07-23--the-error-bar-outlived-the-screen-that-produced-it) (the same report — this was the cause, that was the symptom that would not go away)
+
+---
+
+### 2026-07-23 — The error bar outlived the screen that produced it
+
+**Symptom:** "⚠ Job 81 not found" pinned across the app — "it's persistent across other screens".
+
+**Attempted:** Read the view first and found the bar *was* already tappable (`TapGestureRecognizer(DismissError)`), which is why it had never been reported as un-dismissable — only as inescapable.
+
+**Root Cause:** `Error: string option` was set by `ApiError` and cleared by exactly one thing: a tap on the bar itself. Nothing cleared it on navigation and nothing expired it. The notice queue built later in the project got auto-expiry and bottom placement; the older error bar never had that treatment applied to it.
+
+**Fix:** Clearing moved *into* `Nav.push/back/resetTo` so no call site can forget it, plus a ~7s real-time self-dismissal carrying an `ErrorToken` generation counter so an older error's timer cannot wipe the error that replaced it. Both apps. `25e3ddb`.
+
+**Prevention:** When a second, better mechanism for the same job is introduced (the notice queue), audit the first one rather than leaving two conventions in the codebase — the older one will keep behaving the way it always did, and its behaviour is now the odd one out.
+
+**Verification, stated honestly:** by test only — three tests, one mutation-checked (removing `Error = None` from `Nav.push` turns it red). Three attempts to photograph the bar failed because its new lifetime is shorter than a simulator round-trip; see the lesson on transient fixes outrunning screenshot verification.
+
+**Time Lost:** ~30 min, most of it on the failed attempts to capture it visually.
+
+**Severity:** Medium — cosmetic in isolation, but it plants a red error banner across an unrelated screen during a demo and nothing removes it.
+
+**Related:** [Lesson: a fix that makes something transient can outrun the tool that verifies it](#2026-07-23--a-fix-that-makes-something-transient-can-outrun-the-tool-that-verifies-it); [Mistake: a reseed left every open app holding jobs that no longer existed](#2026-07-23--a-reseed-left-every-open-app-holding-jobs-that-no-longer-existed)
+
+---
 
 ### 2026-07-23 — A restored provider session was shown Offline with no jobs
 
@@ -1171,20 +1263,25 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ### 2026-07-23 — Effects fire at Cmd construction, and the blast radius is unaudited
 
-**Current State:** `apiCmd`/`delayCmd` wrap a hot `task { }`, so the effect starts when the `Cmd` is built inside `update`, not when Fabulous dispatches it. Discovered while mutation-testing an unrelated fix; no code is known to depend on the difference, and no code is known to be safe from it either.
+**Current State:** `apiCmd`/`delayCmd` wrap a hot `task { }`, so the effect starts when the `Cmd` is built inside `update`, not when Fabulous dispatches it. Discovered while mutation-testing an unrelated fix.
 
-**Limitation:** Two open questions nobody has answered. (1) Which existing Cmd-draining tests are passing because construction fired the effect rather than because the drain did — those tests are weaker than their names claim. (2) Whether any `update` arm constructs a `Cmd` it does not return, which would be an invisible live API call.
+**Updated 2026-07-23 — the audit ran, and the gap is narrower than first written.** Item 1 below is closed: **no `Cmd` is constructed and then dropped anywhere in either app.** `grep -rn "let [A-Za-z_]* *= *\(apiCmd\|delayCmd\)"` over both apps returns nothing; the only `let`-bound command is `backOnline` in `Provider.Mobile/Update.fs` (bound to a `match` whose arms call `apiCmd`) and it is always returned in the batch, as are the `let cmd = match …` bindings in both `Navigate` arms. So there is **no invisible live API call and no product defect** — what remains is entirely about how much some tests prove.
 
-**Ideal Solution:** Make `apiCmd` cold — `Cmd.ofSub (fun dispatch -> (task { … }) |> ignore)`, so nothing runs until dispatch — then re-run both mobile suites and see what changes. A test that goes red under a cold `apiCmd` was asserting on construction.
+**Limitation:** The affected tests can now be named exactly, which the first write-up could not do. Only tests asserting on a **recording stub reached through `apiCmd`** are weakened, because the stub is called during `Update.update` whether or not the Cmd is drained — five of them: `finishing a job puts an off-shift provider back online`, `a restored session hydrates the shift flag`, and `a data reset drops the stale world and refetches` (both apps).
+
+The `runWith` typing/seen tests are **not** affected, and that distinction matters before anyone edits them: they go through `Cmd.ofSub (fun _ -> deps.SendTyping …)`, which is already cold, so their drain is load-bearing and their guards are genuinely covered.
+
+**Ideal Solution:** Make `apiCmd` cold — `Cmd.ofSub (fun dispatch -> (task { … }) |> ignore)` — so nothing runs until dispatch. The five tests above should stay green *for the right reason* rather than turn red (the stubs return `Task.FromResult`, so the deps call still happens synchronously inside the drained sub); any test that does go red was asserting on something else and needs reading.
 
 **Closing this gap requires:**
-1. Grep both apps for `let … = apiCmd` bindings that are conditionally dropped — ~15 min — pending
-2. Switch `apiCmd` to a cold wrapper in both apps — ~20 min — pending
-3. Re-run `Customer.Mobile.Tests` + `Provider.Mobile.Tests` and triage any newly-red test as "was asserting on construction" — ~30 min — pending
+1. Audit both apps for `Cmd`s constructed and conditionally dropped — ~15 min — ✅ **done 2026-07-23: none exist**
+2. Switch `apiCmd` **and `delayCmd`** to a cold wrapper in both apps — ~20 min — pending. `delayCmd` has the same shape, so its timer currently starts at construction; indistinguishable today, same latent trap.
+3. Re-run `Customer.Mobile.Tests` + `Provider.Mobile.Tests`; triage any newly-red test as "was asserting on construction" — ~30 min — pending
+4. **Add a test that proves `apiCmd` is cold** — construct against a recording stub, assert nothing recorded, drain, assert recorded — ~10 min — pending. This is the missing active mitigation: without it, item 2 silently reverts the first time the helper is rewritten and nothing anywhere fails.
 
-**Active mitigation:** None automatic. The manual rule, applied from now on: **mutate the Cmd's construction, not its presence in the returned batch** — removing it from `Cmd.batch` proves nothing.
+**Active mitigation:** None automatic yet — item 4 is it, and it is not written. The manual rule until then: **mutate the Cmd's construction, not its presence in the returned batch** — removing it from `Cmd.batch` proves nothing, which is the exact false negative that surfaced this.
 
-**Priority:** Medium — no known live defect, but it silently weakens the one testing technique this project relies on for guard logic.
+**Priority:** Medium — confirmed no live defect, but it silently weakens the one testing technique this project relies on for guard logic.
 
 **Related:** [Lesson: a Cmd here is not inert](#2026-07-23--a-cmd-here-is-not-inert-the-effect-fires-when-the-cmd-is-built-not-when-it-is-dispatched); [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic)
 
