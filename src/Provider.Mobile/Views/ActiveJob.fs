@@ -1,5 +1,6 @@
 module FixItHere.Provider.Views.ActiveJob
 
+open Microsoft.Maui
 open Microsoft.Maui.Controls
 open Fabulous.Maui
 open type Fabulous.Maui.View
@@ -34,12 +35,17 @@ module private MapCache =
             let v = HtmlWebViewSource(Html = MapHtml.render baseUrl lat lng providerId)
             cache[key] <- v
             v
+
+/// Urgency drives colour, mapped onto the shared token set so this screen
+/// agrees with Home and JobDetail about what each colour means — a provider
+/// bouncing between screens must never see the same word paired with two
+/// different colours.
 let private urgencyColor (u: Urgency) =
     match u with
-    | Urgency.Overdue -> Microsoft.Maui.Graphics.Color.FromRgb(0xB0, 0x2A, 0x2A)
-    | Urgency.Urgent -> Microsoft.Maui.Graphics.Color.FromRgb(0x9A, 0x5B, 0x0A)
-    | Urgency.Soon -> Microsoft.Maui.Graphics.Color.FromRgb(0x2B, 0x4D, 0x8A)
-    | Urgency.Calm -> Microsoft.Maui.Graphics.Color.FromRgb(0x3A, 0x3A, 0x42)
+    | Urgency.Overdue -> Theme.danger
+    | Urgency.Urgent -> Theme.warning
+    | Urgency.Soon -> Theme.calm
+    | Urgency.Calm -> Theme.inkMuted
 
 let private statusLine (state: string) (cancelledBy: string) =
     match JobStateCodec.tryParse state with
@@ -63,9 +69,120 @@ let private actionButton (j: FixItHere.Shared.Dtos.JobDto) =
             | Accepted | RateAndClose | Cancel | MarkNoShow -> Depart j.Id
         label, msg)
 
+/// Denser provider mirror of the customer Tracking screen's `statusCard`:
+/// who, what, and the two numbers this whole screen exists to show — the
+/// countdown and the payout. Its own function so the Border and the match on
+/// the countdown inside it resolve independently of the outer Grid.
+let private statusCard (model: Model) (job: FixItHere.Shared.Dtos.JobDto) =
+    Border(
+        VStack(spacing = Theme.Space.xs) {
+            Button("‹", GoBack)
+                .font(size = Theme.Font.title1)
+                .textColor(Theme.brand)
+                .width(Theme.touchTarget).height(Theme.touchTarget)
+
+            Label(statusLine job.State job.CancelledBy)
+                .font(size = Theme.Font.title3, attributes = FontAttributes.Bold)
+                .textColor(Theme.ink)
+
+            // The countdown is the headline, not a footnote: it is the
+            // number this screen exists to show. One Label rather than a
+            // nested HStack — Fabulous CE rejects nesting here.
+            match countdownFor model job with
+            | Some c ->
+                Label(sprintf "%s %s" c.Label c.Value)
+                    .font(size = Theme.Font.title1, attributes = FontAttributes.Bold)
+                    .textColor(urgencyColor c.Urgency)
+            | None -> ()
+
+            Label(sprintf "%s — %s" job.CustomerName job.Address)
+                .font(size = Theme.Font.subhead)
+                .textColor(Theme.ink)
+                .lineBreakMode(Microsoft.Maui.LineBreakMode.WordWrap)
+
+            Label(Format.money job.Price)
+                .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
+                .textColor(Theme.brandInk)
+        })
+        .stroke(Theme.surfaceEdge)
+        .strokeThickness(Theme.strokeHair)
+        .strokeShape(RoundRectangle(cornerRadius = Theme.radiusControl))
+        .background(Theme.surface)
+        .padding(Theme.Space.lg)
+
+/// Running-late / pending-proposal bar. Offered only while an arrival is
+/// still ahead of us, and only when nothing is already pending — the server
+/// refuses a second proposal, so a button that could raise one would be a
+/// lie. One flat HStack: Fabulous CE rejects nested layouts here.
+let private lateControlsBar (lateControlsVisible: bool) (proposalPending: bool) (jobId: int) =
+    HStack(spacing = Theme.Space.sm) {
+        if lateControlsVisible then
+            Label("Running late?")
+                .font(size = Theme.Font.footnote)
+                .textColor(Theme.inkMuted)
+                .centerVertical()
+            for mins in [ 10; 15; 30 ] do
+                Button(sprintf "+%dm" mins, ProposeDelay (jobId, mins))
+                    .font(size = Theme.Font.callout, attributes = FontAttributes.Bold)
+                    .textColor(Theme.brandInk)
+                    .background(Theme.brandWash)
+        elif proposalPending then
+            Label("Waiting for the customer to answer")
+                .font(size = Theme.Font.footnote, attributes = FontAttributes.Bold)
+                .textColor(Theme.warning)
+                .centerVertical()
+    }
+
+/// The one clear next action, and the app's spine: full-width, unmistakable,
+/// and the only filled control on the screen. Success-green rather than the
+/// brand-honey `primaryButton` shape JobDetail's Accept uses — this button
+/// *advances* a job already under way, and the colour tells a provider
+/// bouncing between screens which kind of primary action they are looking
+/// at. Chat/Call/Cancel below stay plain text, visibly secondary.
+let private nextActionButton (label: string) (msg: Msg) =
+    Border(
+        Button(label, msg)
+            .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
+            .textColor(Theme.onBrand))
+        .stroke(Theme.success)
+        .strokeThickness(Theme.strokeThick)
+        .strokeShape(RoundRectangle(cornerRadius = Theme.radiusControl))
+        .background(Theme.success)
+        .padding(Thickness(Theme.Space.xs, Theme.Space.xs, Theme.Space.xs, Theme.Space.xs))
+
+/// Chat, Call, Cancel — visibly secondary to the action button above: plain
+/// text, no fill, so the eye lands on the one button that actually advances
+/// the job. Asks before acting: cancelling is irreversible and was one tap
+/// away, on a screen an investor is handed to poke at.
+let private secondaryBar (model: Model) (job: FixItHere.Shared.Dtos.JobDto) =
+    HStack(spacing = Theme.Space.xl) {
+        Button("Call", StartFakeCall)
+            .font(size = Theme.Font.callout, attributes = FontAttributes.Bold)
+            .textColor(Theme.brand)
+        Button("Chat", Navigate (Chat job.Id))
+            .font(size = Theme.Font.callout, attributes = FontAttributes.Bold)
+            .textColor(Theme.brand)
+        if model.ConfirmingCancel = Some job.Id then
+            Button("Yes, cancel", CancelJob job.Id)
+                .font(size = Theme.Font.callout, attributes = FontAttributes.Bold)
+                .textColor(Theme.danger)
+            Button("Keep it", DismissCancel)
+                .font(size = Theme.Font.callout)
+                .textColor(Theme.inkMuted)
+        else
+            Button("Cancel Job", RequestCancel job.Id)
+                .font(size = Theme.Font.callout)
+                .textColor(Theme.inkMuted)
+    }
+
 let view (model: Model) (jobId: int) =
     match model.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
-    | None -> AnyView((VStack(spacing = 12.) { Button("← Back", GoBack); Label("Job not found") }).padding(24.))
+    | None ->
+        AnyView(
+            (VStack(spacing = Theme.Space.md) {
+                Button("‹", GoBack).font(size = Theme.Font.title1).textColor(Theme.brand).width(Theme.touchTarget).height(Theme.touchTarget)
+                Label("Job not found").font(size = Theme.Font.body).textColor(Theme.inkMuted)
+            }).padding(Theme.gutter))
     | Some job ->
         let sched : Reschedule = rescheduleOf job
         let awaitingArrival =
@@ -75,54 +192,24 @@ let view (model: Model) (jobId: int) =
         let proposalPending = sched.Pending.IsSome
         let lateControlsVisible = awaitingArrival && not proposalPending
         AnyView(
-            (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto ]) {
-                (VStack(spacing = 4.) {
-                    Button("← Back", GoBack)
-                    Label(statusLine job.State job.CancelledBy).font(size = 20.)
-                    // The countdown is the headline, not a footnote: it is
-                    // the number this screen exists to show. One Label rather
-                    // than a nested HStack — Fabulous CE rejects nesting here.
-                    match countdownFor model job with
-                    | Some c ->
-                        Label(sprintf "%s %s" c.Label c.Value)
-                            .font(size = 22.)
-                            .textColor(urgencyColor c.Urgency)
-                    | None -> ()
-                    Label(sprintf "%s — %s" job.CustomerName job.Address)
-                    Label(Format.money job.Price)
-                }).gridRow(0)
+            (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto; Auto ]) {
+                (statusCard model job).gridRow(0)
+
                 WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(1)
-                // Offered only while an arrival is still ahead of us, and only
-                // when nothing is already pending — the server refuses a second
-                // proposal, so a button that could raise one would be a lie.
-                //
-                // One flat HStack: Fabulous CE rejects nested layouts here.
-                (HStack(spacing = 8.) {
-                    if lateControlsVisible then
-                        Label("Running late?")
-                            .font(size = 13.)
-                            .textColor(Theme.inkMuted)
-                            .centerVertical()
-                        for mins in [ 10; 15; 30 ] do
-                            Button(sprintf "+%d" mins, ProposeDelay (job.Id, mins))
-                    elif proposalPending then
-                        Label("Waiting for the customer to answer")
-                            .font(size = 13.)
-                            .textColor(Theme.warning)
-                })
+
+                (lateControlsBar lateControlsVisible proposalPending job.Id)
+                    .padding(Thickness(0., Theme.Space.xs, 0., Theme.Space.xs))
                     .gridRow(2)
 
-                (HStack(spacing = 8.) {
-                    match actionButton job with
-                    | Some (label, msg) -> Button(label, msg).background(Microsoft.Maui.Graphics.Colors.SeaGreen)
-                    | None -> ()
-                    Button("Chat", Navigate (Chat job.Id))
-                    Button("Call", StartFakeCall)
-                    if model.ConfirmingCancel = Some job.Id then
-                        Button("Yes, cancel", CancelJob job.Id).textColor(Theme.danger)
-                        Button("Keep it", DismissCancel)
-                    else
-                        Button("Cancel", RequestCancel job.Id).textColor(Theme.danger)
-                }).gridRow(3)
-            }).padding(12.)
+                // The one clear next action. Its own row so it can be
+                // full-width and unmissable — never sharing a row with
+                // Chat/Call/Cancel the way a wall-of-buttons layout would.
+                match actionButton job with
+                | Some (label, msg) -> (nextActionButton label msg).gridRow(3)
+                | None -> ()
+
+                (secondaryBar model job)
+                    .padding(Thickness(0., Theme.Space.sm, 0., 0.))
+                    .gridRow(4)
+            }).padding(Theme.Space.md)
         )
