@@ -1,8 +1,8 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Foreground for the app icon: the FixItHere pin in white, sat on the honey
-       (#9C6516) icon background set by MauiIcon Color. The inner circle matches
-       the background so it reads as a cutout; the wrench is white. -->
-  <path fill="#FFFFFF" d="M256 96c-79.5 0-144 64.5-144 144 0 39.4 23.5 82.8 53 120.7 29.3 37.6 63.6 68.3 82.5 84.3a13 13 0 0 0 17 0c18.9-16 53.2-46.7 82.5-84.3 29.5-37.9 53-81.3 53-120.7 0-79.5-64.5-144-144-144z"/>
+  <!-- Foreground for the app icon, on the honey (#9C6516) MauiIcon background:
+       a red map pin (the Google-Maps convention) with the honey brand colour
+       kept as the inner circle and the wrench in white. -->
+  <path fill="#EA4335" d="M256 96c-79.5 0-144 64.5-144 144 0 39.4 23.5 82.8 53 120.7 29.3 37.6 63.6 68.3 82.5 84.3a13 13 0 0 0 17 0c18.9-16 53.2-46.7 82.5-84.3 29.5-37.9 53-81.3 53-120.7 0-79.5-64.5-144-144-144z"/>
   <circle cx="256" cy="232" r="62" fill="#9C6516"/>
   <path fill="#FFFFFF" d="M285 205a29 29 0 0 1-36 36l-28 28a10 10 0 0 1-15 0l-2-3a10 10 0 0 1 0-14l28-28a29 29 0 0 1 36-36l-16 16a7 7 0 0 0 0 10l7 7a7 7 0 0 0 10 0z"/>
 </svg>
