@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair that shared no job, and cold Cmd helpers. CI re-enabled; five stale gaps archived)
+- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair that shared no job, and cold Cmd helpers. CI re-enabled and green; five stale gaps archived)
 
 ---
 
@@ -1245,22 +1245,35 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Solution Gaps
 
-### 2026-07-23 — CI is re-enabled but GitHub Actions is blocked on billing
+### 2026-07-23 — The iOS CI job reports success without building anything
 
-**Current State:** `.github/workflows/ci.yml` was restored to `push:` + `pull_request:` on 2026-07-23, after being paused since 2026-07-20 for the believability rebuild's DTO churn. The suite it runs is green — 212 tests across the four projects. But Actions is blocked by an account billing issue, so runs fail or refuse to start for reasons unrelated to this repository.
+**Current State:** CI is live and green since 2026-07-23 (`push:` + `pull_request:` restored in `ee7333e`; first run passed both jobs). But the `Build apps (iOS)` job carries its own annotation: *"xcodebuild cannot resolve the macOS SDK when invoked under MSBuild on this runner image, though the same call succeeds standalone. Known image/toolchain defect, not a code failure — this job gates again automatically once the image works."* It reports ✓ in 2m14s having proven nothing about whether either app packages.
 
-**Limitation:** The gate exists and does not gate. Worse than not having it: a *red* CI badge that means "billing", not "broken", trains everyone to ignore red — which is exactly the state a required check is supposed to prevent. The re-enable was made with that known and accepted; the workflow's header comment says so, so a contributor meeting a failure knows to reproduce locally before believing it.
+**Limitation:** A green tick that means "skipped" is the same hazard as a red one that means "billing" — it reads as coverage that does not exist. Nothing in CI compiles view code: the `Tests` job cannot (no test project includes `Views/*.fs` or `MauiProgram.fs`), and the job that could, doesn't. **The local `-f net10.0-ios -t:Compile` gate remains the only thing checking view code anywhere**, and it depends on a human remembering to run it.
 
 **Closing this gap requires:**
-1. Resolve the GitHub Actions billing issue on the account — not a code change, and not something this repo can do — pending
-2. Confirm the first real run is green on `ubuntu-latest` (tests) — ~10 min once (1) clears — pending
-3. Decide whether the iOS `-t:Compile` gate belongs in the same job or a small macOS one, and make the Tests job a required check on `main` — ~30 min — pending
+1. Add `-f net10.0-ios -t:Compile` for both apps to the **Tests** job — it needs no Xcode (the F# compiler's reference assemblies come from the workload pack, and `Compile` stops before the asset pipeline), so it should survive `ubuntu-latest` if the iOS pack restores there — ~30 min, and the first run tells you — pending
+2. If the pack does not restore on ubuntu, move it to a small `macos-latest` job instead — ~30 min — pending
+3. Leave `Build apps (iOS)` advisory; it self-describes and re-gates automatically — no action
 
-**Active mitigation:** The four `dotnet test` commands and the two `-f net10.0-ios -t:Compile` builds are the real gate meanwhile, run locally before every commit this session. Never `dotnet test` the `.slnx` — it pulls in the mobile TFMs and fails for environment reasons.
+**Priority:** High — this is the project's largest standing verification gap, and it predates the believability rebuild. Two-thirds of that rebuild touched code no CI job compiles.
 
-**Priority:** Medium — nothing is unverified today because the local gate is being run, but that depends entirely on discipline, which is what CI exists to replace.
+**Related:** [Mitigating the view-code verification gap](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); [Archived: the Mac Catalyst CI job cannot be a required check](#2026-07-19--the-mac-catalyst-ci-job-cannot-be-a-required-check)
 
-**Related:** [Environment-dependent failures cannot be gated by pre-flight probes](#2026-07-20--environment-dependent-failures-cannot-be-gated-by-pre-flight-probes-build-then-classify); [Mistake: an unverified probe justified removing continue-on-error](#2026-07-20--an-unverified-probe-justified-removing-continue-on-error-and-turned-green-runs-red)
+---
+
+### 2026-07-23 — Two build warnings that local verification has been filtering out
+
+**Current State:** CI's annotations surfaced a warning nobody here had seen: `FS3391` at [DevEndpoints.fs:172](src/Backend.Api/DevEndpoints.fs) (implicit `int` → `Nullable<int>` conversion). Re-running the build locally without a filter also shows `NU1903`: `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 has a **known high-severity vulnerability** ([GHSA-2m69-gcr7-jv3q](https://github.com/advisories/GHSA-2m69-gcr7-jv3q)).
+
+**Limitation:** Both were invisible during this session because every build in it was piped through `grep -E "error|Build succeeded"` — a filter that shows failures and successes and hides everything in between. The plan's reviewer checklist asks for "0 warnings / 0 errors **shown**, not assumed"; the filter quietly turned that into "no errors shown". The `NU1903` one matters beyond tidiness: it is a transitive dependency with a published advisory, in the package that backs the demo database.
+
+**Closing this gap requires:**
+1. Stop filtering warnings out of build output — use `grep -E "error|warning|Build succeeded"` or read the tail — ~0 min, a habit — pending
+2. Bump `SQLitePCLRaw`/`Microsoft.Data.Sqlite` to a version past the advisory and confirm the suite still passes — ~30 min — pending
+3. Make the `Nullable` conversion explicit at `DevEndpoints.fs:172` rather than suppressing `FS3391` — ~10 min — pending
+
+**Priority:** Medium — no functional impact known, but one is a published security advisory and the other proves the local verification loop was reporting less than it claimed.
 
 ---
 
@@ -1576,6 +1589,27 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 > Entries moved here when the underlying condition no longer applies.
 > Kept for historical context.
+
+### 2026-07-23 — CI is re-enabled but GitHub Actions is blocked on billing
+
+**Current State:** `.github/workflows/ci.yml` was restored to `push:` + `pull_request:` on 2026-07-23, after being paused since 2026-07-20 for the believability rebuild's DTO churn. The suite it runs is green — 212 tests across the four projects. But Actions is blocked by an account billing issue, so runs fail or refuse to start for reasons unrelated to this repository.
+
+**Limitation:** The gate exists and does not gate. Worse than not having it: a *red* CI badge that means "billing", not "broken", trains everyone to ignore red — which is exactly the state a required check is supposed to prevent. The re-enable was made with that known and accepted; the workflow's header comment says so, so a contributor meeting a failure knows to reproduce locally before believing it.
+
+**Closing this gap requires:**
+1. Resolve the GitHub Actions billing issue on the account — not a code change, and not something this repo can do — pending
+2. Confirm the first real run is green on `ubuntu-latest` (tests) — ~10 min once (1) clears — pending
+3. Decide whether the iOS `-t:Compile` gate belongs in the same job or a small macOS one, and make the Tests job a required check on `main` — ~30 min — pending
+
+**Active mitigation:** The four `dotnet test` commands and the two `-f net10.0-ios -t:Compile` builds are the real gate meanwhile, run locally before every commit this session. Never `dotnet test` the `.slnx` — it pulls in the mobile TFMs and fails for environment reasons.
+
+**Priority:** Medium — nothing is unverified today because the local gate is being run, but that depends entirely on discipline, which is what CI exists to replace.
+
+**Related:** [Environment-dependent failures cannot be gated by pre-flight probes](#2026-07-20--environment-dependent-failures-cannot-be-gated-by-pre-flight-probes-build-then-classify); [Mistake: an unverified probe justified removing continue-on-error](#2026-07-20--an-unverified-probe-justified-removing-continue-on-error-and-turned-green-runs-red)
+
+**Archived 2026-07-23 — this entry was wrong, and is kept as a correction rather than deleted.** It was written on a reported billing constraint *before* the re-enabled workflow had run once. The first two runs (push `30028398304`, pull_request `30028402397`) both completed **success** — Tests in 1m10s, Build apps (iOS) in 2m14s — so Actions was never blocked. The lesson is the ordinary one: a constraint that has not been observed is a hypothesis, and writing it into the journal as a fact costs more than waiting ninety seconds for the run. What *is* real from that first run is recorded separately below.
+
+---
 
 ### 2026-07-18 — Task 12's two-app manual acceptance walk and final per-task review were not completed before disk exhaustion interrupted the session
 

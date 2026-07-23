@@ -5,11 +5,14 @@ name: CI
 # that automatic red was noise rather than signal. That stretch is finished and
 # the suite is green (212 tests across the four projects).
 #
-# KNOWN: GitHub Actions is currently blocked on an account billing issue, so
-# runs will fail or refuse to start for reasons that have nothing to do with
-# this repository. Red here does NOT mean red locally — reproduce with the four
-# `dotnet test` commands in the Tests job before believing a failure. Revert to
-# `workflow_dispatch:` alone if the noise outweighs the signal.
+# First run after re-enabling passed both jobs (Tests 1m10s, Build apps 2m14s).
+#
+# NOTE on what green means here: the `build-apps` job cannot resolve the macOS
+# SDK under MSBuild on the hosted image, so it self-skips and still reports
+# success — see its own annotation. No job in this workflow compiles view code
+# (`Views/*.fs`, `MauiProgram.fs`): the test projects do not include it, and the
+# job that could does not run. Until that is fixed, `dotnet build src/<App>
+# -f net10.0-ios -t:Compile` locally is the only gate on view code.
 on:
   push:
   pull_request:
