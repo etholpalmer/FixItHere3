@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair that shared no job, and cold Cmd helpers. CI re-enabled and green; five stale gaps archived)
+- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair that shared no job, cold Cmd helpers, and the SQLite advisory. CI re-enabled and green with a working macOS view-code compile gate; six stale gaps archived)
 
 ---
 
@@ -57,6 +57,22 @@
 **Active mitigation:** None yet, and that is the honest state. The concrete one is a shared `startupCmds (s: Session) : Cmd<Msg> list` called by both arms in each app, so a new startup effect can only be added in one place — roughly twenty minutes' work, not done. Until then the rule is manual: **grep both arms whenever either changes.**
 
 **Related:** [Mistake: a restored provider session was shown Offline with no jobs](#2026-07-23--a-restored-provider-session-was-shown-offline-with-no-jobs); [Mistake: a restored session connected to no live hub](#2026-07-22--a-restored-session-connected-to-no-live-hub)
+
+---
+
+### 2026-07-23 — A build that passes locally can fail in CI purely on installed workloads ("ambient toolchain state")
+
+**Insight:** `dotnet build src/App -f net10.0-ios -t:Compile` passed on every dev machine and failed twice in CI before working — not because the code differed, but because the machines had SDK **workloads** installed that the fresh runner did not. First the `ios` workload does not exist on Linux at all; then on macOS, `-f net10.0-ios` still evaluates the project's *other* TFM (`net10.0-android`) during restore, which demands the `maui-android` workload manifest — absent unless the full `maui` workload is installed, which dev machines have and a minimal CI step did not.
+
+**Discovery:** Three red CI runs in a row for a command that was green locally at 0/0. `dotnet workload list` on the dev machine showed `maui 10.0.20` present — the ambient state that had been silently satisfying the restore check the whole time.
+
+**Design intent:** `-f net10.0-ios` reads as "only touch iOS", and for the *build* it does. The surprise is that **restore evaluates every TargetFramework regardless of `-f`**, so a multi-TFM project's workload requirements are the union of all its TFMs even when you build one. The `-f` flag narrows compilation, not evaluation.
+
+**Impact:** The general form, worth hunting for whenever a build is green locally but red in CI: the difference is rarely the code and often the *toolchain's installed state* — workloads, global tools, SDK bands, `PATH` entries — none of which live in the repo. The durable fixes are (a) pin what the build needs explicitly where possible, and (b) treat the **first clean-runner run as the real verification**, because a dev machine accumulates state that masks missing dependencies. "Works on my machine" here was literally true and literally useless.
+
+**Active mitigation:** The `compile-gate` job is itself the mitigation — it runs the command on a clean runner every push, so ambient-state drift on any one dev machine can no longer hide a missing workload dependency. The job comment records *why* it installs `maui` rather than `ios`, so the reasoning is not re-derived from a red run next time.
+
+**Related:** [Archived: the iOS CI job reports success without building anything](#2026-07-23--the-ios-ci-job-reports-success-without-building-anything); [A screenshot verifies the *installed* binary, not the source](#2026-07-22--a-screenshot-verifies-the-installed-binary-not-the-source)
 
 ---
 
@@ -1245,23 +1261,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Solution Gaps
 
-### 2026-07-23 — The iOS CI job reports success without building anything
-
-**Current State:** CI is live and green since 2026-07-23 (`push:` + `pull_request:` restored in `ee7333e`; first run passed both jobs). But the `Build apps (iOS)` job carries its own annotation: *"xcodebuild cannot resolve the macOS SDK when invoked under MSBuild on this runner image, though the same call succeeds standalone. Known image/toolchain defect, not a code failure — this job gates again automatically once the image works."* It reports ✓ in 2m14s having proven nothing about whether either app packages.
-
-**Limitation:** A green tick that means "skipped" is the same hazard as a red one that means "billing" — it reads as coverage that does not exist. Nothing in CI compiles view code: the `Tests` job cannot (no test project includes `Views/*.fs` or `MauiProgram.fs`), and the job that could, doesn't. **The local `-f net10.0-ios -t:Compile` gate remains the only thing checking view code anywhere**, and it depends on a human remembering to run it.
-
-**Closing this gap requires:**
-1. Add `-f net10.0-ios -t:Compile` for both apps to the **Tests** job — it needs no Xcode (the F# compiler's reference assemblies come from the workload pack, and `Compile` stops before the asset pipeline), so it should survive `ubuntu-latest` if the iOS pack restores there — ~30 min, and the first run tells you — pending
-2. If the pack does not restore on ubuntu, move it to a small `macos-latest` job instead — ~30 min — pending
-3. Leave `Build apps (iOS)` advisory; it self-describes and re-gates automatically — no action
-
-**Priority:** High — this is the project's largest standing verification gap, and it predates the believability rebuild. Two-thirds of that rebuild touched code no CI job compiles.
-
-**Related:** [Mitigating the view-code verification gap](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); [Archived: the Mac Catalyst CI job cannot be a required check](#2026-07-19--the-mac-catalyst-ci-job-cannot-be-a-required-check)
-
----
-
 ### 2026-07-23 — A warning filter hid two real findings (both now fixed; the filter is the lesson)
 
 **Current State:** CI's annotations surfaced a warning nobody here had seen: `FS3391` at [DevEndpoints.fs:172](src/Backend.Api/DevEndpoints.fs) (implicit `int` → `Nullable<int>` conversion). Re-running the build locally without a filter also shows `NU1903`: `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 has a **known high-severity vulnerability** ([GHSA-2m69-gcr7-jv3q](https://github.com/advisories/GHSA-2m69-gcr7-jv3q)).
@@ -1589,6 +1588,29 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 > Entries moved here when the underlying condition no longer applies.
 > Kept for historical context.
+
+### 2026-07-23 — The iOS CI job reports success without building anything
+
+**Current State:** CI is live and green since 2026-07-23 (`push:` + `pull_request:` restored in `ee7333e`; first run passed both jobs). But the `Build apps (iOS)` job carries its own annotation: *"xcodebuild cannot resolve the macOS SDK when invoked under MSBuild on this runner image, though the same call succeeds standalone. Known image/toolchain defect, not a code failure — this job gates again automatically once the image works."* It reports ✓ in 2m14s having proven nothing about whether either app packages.
+
+**Limitation:** A green tick that means "skipped" is the same hazard as a red one that means "billing" — it reads as coverage that does not exist. Nothing in CI compiles view code: the `Tests` job cannot (no test project includes `Views/*.fs` or `MauiProgram.fs`), and the job that could, doesn't. **The local `-f net10.0-ios -t:Compile` gate remains the only thing checking view code anywhere**, and it depends on a human remembering to run it.
+
+**Closing this gap requires:**
+1. Add `-f net10.0-ios -t:Compile` for both apps to the **Tests** job — it needs no Xcode (the F# compiler's reference assemblies come from the workload pack, and `Compile` stops before the asset pipeline), so it should survive `ubuntu-latest` if the iOS pack restores there — ~30 min, and the first run tells you — pending
+2. If the pack does not restore on ubuntu, move it to a small `macos-latest` job instead — ~30 min — pending
+3. Leave `Build apps (iOS)` advisory; it self-describes and re-gates automatically — no action
+
+**Priority:** High — this is the project's largest standing verification gap, and it predates the believability rebuild. Two-thirds of that rebuild touched code no CI job compiles.
+
+**Related:** [Mitigating the view-code verification gap](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); [Archived: the Mac Catalyst CI job cannot be a required check](#2026-07-19--the-mac-catalyst-ci-job-cannot-be-a-required-check)
+
+**Resolution (2026-07-23) — the view-code half is closed; the packaging half remains, lesser.** A dedicated `compile-gate` job (`3a81a82`, on `macos-latest`) runs `-f net10.0-ios -t:Compile` over both apps on every push and is a hard pass/fail — proven to bite twice while landing it (NETSDK1147 on a missing workload), and the plan's own mutation test shows a view referencing a nonexistent `Msg` fails `FS0039`. So the thing this gap was actually about — **no CI job compiling `Views/*.fs`** — is now covered.
+
+What the checklist above got wrong, corrected by the runs: item 1 was impossible, not merely uncertain — `dotnet workload install ios` fails on Linux outright (*"Workload ID ios isn't supported on this platform"*), so it could never have run on the ubuntu Tests job. Item 2 (the macOS fallback) is what shipped. The `Build apps (iOS)` job still self-skips its full package build on the actool defect and still reports green, so **packaging** remains unproven in CI — but that is a much smaller gap than "view code is never compiled anywhere", and it re-gates automatically when the image is fixed.
+
+The reasoning stays active as a pointer: the local `-t:Compile` command is still the fast inner-loop check; CI is now the backstop, not the only gate.
+
+---
 
 ### 2026-07-23 — CI is re-enabled but GitHub Actions is blocked on billing
 
