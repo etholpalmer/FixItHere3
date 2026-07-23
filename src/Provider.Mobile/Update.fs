@@ -65,7 +65,13 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             Nav.resetTo Home { model with Session = Some s },
             Cmd.batch
                 [ apiCmd (fun () -> deps.GetMyJobs s.UserId) JobsLoaded
-                  apiCmd deps.GetClock ClockSynced ]
+                  apiCmd deps.GetClock ClockSynced
+                  // Hydrate the shift flag here too, exactly as LoggedIn does.
+                  // Without it a restored session starts from the local default
+                  // of false and the provider is shown Offline with no jobs
+                  // until they find the toggle — the same "restore skips what
+                  // login does" gap that left restored sessions with no hub.
+                  apiCmd (fun () -> deps.GetProvider s.UserId) ProviderHydrated ]
     | LoginEmailChanged e -> { model with LoginEmail = e }, Cmd.none
     | LoginPasswordChanged p -> { model with LoginPassword = p }, Cmd.none
     | SignIn when model.SigningIn -> model, Cmd.none    // ignore a double tap

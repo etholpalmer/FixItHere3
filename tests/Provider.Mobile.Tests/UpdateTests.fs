@@ -103,6 +103,23 @@ let up msg model = Update.update stubDeps msg model |> fst
 let up' msg model = up msg model
 
 [<Fact>]
+let ``a restored session hydrates the shift flag, like login does`` () =
+    // Online lives on the server. Restoring without asking for it starts from
+    // the local default of false, so a returning provider is shown Offline with
+    // no available jobs until they find the toggle.
+    let asked = ResizeArray<int>()
+    let session : Session = { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" }
+    let deps =
+        { stubDeps with
+            RestoreSession = fun () -> Some session
+            GetProvider = fun id ->
+                asked.Add id
+                Task.FromResult(Error "unused") }
+    let _, cmd = Update.update deps SplashDone Model.initial
+    cmd |> List.iter (fun sub -> sub ignore)
+    Assert.Contains(4, asked)
+
+[<Fact>]
 let ``finishing a job puts an off-shift provider back online`` () =
     // The guard lives entirely in the emitted Cmd, which `up` discards — so
     // this drains it against a recording stub instead. Without that the test
