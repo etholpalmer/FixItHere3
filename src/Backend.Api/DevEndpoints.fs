@@ -21,7 +21,13 @@ type StartDemoRequest =
       Late: bool }
 
 let private okJson (data: 't) = Results.Json(Envelope.ok data)
-let private err code (msg: string) = Results.Json(Envelope.fail msg, statusCode = code)
+// `code: int` is load-bearing, not decoration. Unannotated, inference flowed
+// `Results.Json`'s `Nullable<int>` statusCode back into `code`, which pushed the
+// int->Nullable conversion out to the call site — `err 404` tripped FS3391.
+// Annotating the parameter keeps the conversion at this one boundary and lets
+// callers pass a plain int. Matches the sibling `err` in Endpoints.fs.
+let private err (code: int) (msg: string) =
+    Results.Json(Envelope.fail msg, statusCode = code)
 
 /// Scripted demo timeline.
 ///
