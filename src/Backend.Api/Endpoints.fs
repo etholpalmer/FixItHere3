@@ -243,10 +243,22 @@ let mapAll (app: WebApplication) =
                 | Error msg when msg.Contains "not found" -> return err 404 msg
                 | Error msg -> return err 409 msg })) |> ignore
     mapTransition "accept"   Accepted
-    mapTransition "enroute"  DepartEnRoute
     mapTransition "arrive"   Arrive
     mapTransition "start"    StartWork
     mapTransition "complete" CompleteWork
+
+    // Enroute is special: departing is not just a status change, it starts the
+    // drive to the customer. The car moving, the map re-fitting around the
+    // closing dots, and the ETA counting down all follow from the location
+    // stream this kicks off — see Movement.driveEnRoute.
+    app.MapPut("/jobs/{id}/enroute",
+        Func<int, JobService, IServiceProvider, System.Threading.Tasks.Task<IResult>>(fun id svc sp -> task {
+            match! svc.Apply id DepartEnRoute with
+            | Ok dto ->
+                Movement.driveEnRoute sp id |> ignore   // fire-and-forget: drive to the customer
+                return okJson dto
+            | Error msg when msg.Contains "not found" -> return err 404 msg
+            | Error msg -> return err 409 msg })) |> ignore
 
     // Cancel is bilateral and asymmetric to the rest: every other transition
     // has exactly one party who can legally perform it, so the path alone

@@ -92,23 +92,6 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) (late: bool) =
                          job.CustomerId, job.ProviderId)
             }
 
-        let moveTo (lat: float) (lng: float) =
-            task {
-                let tracked = db.Providers.Single(fun p -> p.Id = job.ProviderId)
-                db.Entry(tracked).CurrentValues.SetValues({ tracked with Lat = lat; Lng = lng })
-                db.SaveChanges() |> ignore
-                do! hub.LocationUpdated
-                        { ProviderId = job.ProviderId; Lat = lat; Lng = lng
-                          UpdatedAt = (clock.Now()).ToString "o" }
-            }
-
-        let startLat, startLng = prov.Lat, prov.Lng
-        let km = Geo.distanceKm (startLat, startLng) (job.Lat, job.Lng)
-        // The journey takes as long as the ETA says it takes. Any other number
-        // here is the contradiction this task exists to remove.
-        let journey = Travel.durationFor km
-        let steps = 12
-
         do! waitDemo (TimeSpan.FromMinutes 1.0)
         do! hub.NotifyJob ("Provider Accepted", job.CustomerId, job.ProviderId)
         do! apply Accepted
@@ -136,12 +119,10 @@ let private runTimeline (sp: IServiceProvider) (jobId: int) (late: bool) =
 
         do! waitDemo (TimeSpan.FromMinutes 1.0)
         do! apply DepartEnRoute
-
-        for i in 1 .. steps do
-            do! waitDemo (journey / float steps)
-            let t = float i / float steps
-            do! moveTo (startLat + (job.Lat - startLat) * t) (startLng + (job.Lng - startLng) * t)
-            if i = 4 then do! say "On my way — should be about ten minutes."
+        do! say "On my way — should be about ten minutes."
+        // One travel interpolator, shared with the real in-app Depart. Awaited
+        // here because the script applies Arrive only once the car has arrived.
+        do! Movement.driveEnRoute sp jobId
 
         do! hub.NotifyJob ("Provider Arriving", job.CustomerId, job.ProviderId)
         do! apply Arrive
