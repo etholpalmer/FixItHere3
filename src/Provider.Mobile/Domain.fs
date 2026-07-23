@@ -96,6 +96,26 @@ type Model =
       ConfirmingCancel: int option
       Error: string option }
 
+/// What the marketplace may offer this provider right now.
+///
+/// Derived, never stored. A provider standing in someone's kitchen is not
+/// available whatever their shift toggle last said, and holding that as a
+/// second flag would be one more thing to leave stale — the same shape as the
+/// stale-timer bugs this codebase has already paid for twice. One rule, one
+/// place, recomputed from the jobs list every frame.
+///
+/// `OnAJob` outranks `Offline` deliberately: someone mid-job is on a job, not
+/// off shift, and telling them "Offline" while they stand at a customer's door
+/// would be the screen contradicting the work.
+[<RequireQualifiedAccess>]
+type Availability =
+    /// Off shift, by their own choice.
+    | Offline
+    /// Committed to a job that is under way. Not offered anything else.
+    | OnAJob
+    /// On shift and free to be offered work.
+    | Available
+
 module Model =
     let initial =
         { Screen = Splash; History = []; Session = None; Online = false
@@ -277,6 +297,17 @@ module Domain =
             JobStateCodec.tryParse j.State
             |> Option.map JobStatus.isInFlight
             |> Option.defaultValue false)
+
+    /// The one rule for whether this provider can be offered work.
+    ///
+    /// A job in flight takes them off the market for its whole duration — they
+    /// are driving to, or standing at, someone's address — and only marking it
+    /// complete puts them back. Nothing stores that: the moment the job leaves
+    /// the in-flight set this returns `Available` again on its own.
+    let availability (m: Model) =
+        match activeJob m with
+        | Some _ -> Availability.OnAJob
+        | None -> if m.Online then Availability.Available else Availability.Offline
 
     /// True when an incoming hub chat message should trigger a canned auto-reply:
     /// auto-reply is enabled, the message isn't my own, and the sender is the

@@ -154,7 +154,19 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             { m with GpsLoopActive = true; SliderStart = None },
             delayCmd 3000 (GpsTick job.Id)   // start GPS loop (once)
         | ActiveJob id, "Completed" when id = job.Id ->
-            Nav.push m (Payment job.Id), delayCmd 2000 (PaymentDelayDone job.Id)
+            // Marking the work done is what puts a provider back on the market.
+            // Leaving the in-flight set does most of it on its own — availability
+            // is derived, so Home reopens the moment this job lands. The one gap
+            // is a provider whose stored shift flag was off when the job began:
+            // the toggle is not offered while a job is under way, so nothing
+            // else would ever turn it back on and they would finish into an
+            // Offline screen they never chose.
+            let backOnline =
+                match m.Session with
+                | Some s when not m.Online -> apiCmd (fun () -> deps.SetOnline s.UserId true) OnlineChanged
+                | _ -> Cmd.none
+            Nav.push m (Payment job.Id),
+            Cmd.batch [ delayCmd 2000 (PaymentDelayDone job.Id); backOnline ]
         | _ -> m, Cmd.none
     | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none

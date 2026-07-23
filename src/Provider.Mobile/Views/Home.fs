@@ -19,28 +19,45 @@ let private urgencyColor (u: Urgency) =
     | Urgency.Soon -> Theme.calm
     | Urgency.Calm -> Theme.inkMuted
 
-/// The shift switch. A native `Switch` rather than a button that relabels
-/// itself — this is exactly the platform control HIG reserves for a binary
-/// state, and the dot carries "online or not" before the label is even read.
+/// The shift row. A native `Switch` rather than a button that relabels itself
+/// — this is exactly the platform control HIG reserves for a binary state, and
+/// the dot carries the answer before the label is even read.
+///
+/// The switch is *absent*, not disabled, while a job is under way. Availability
+/// is not the provider's to set at that moment: they are at a customer's
+/// address, and the only thing that puts them back on the market is finishing.
+/// A greyed-out control would invite a tap and explain nothing; the sentence
+/// beside the dot does the explaining instead.
+///
 /// Its own function so the Grid inside the Border resolves independently of
 /// the outer VStack (FS0792).
-let private onlineRow (online: bool) =
+let private shiftRow (state: Availability) =
+    let dot, dotColor, text =
+        match state with
+        | Availability.Available -> "●", Theme.success, "Online — visible for new jobs"
+        | Availability.OnAJob -> "●", Theme.brand, "On a job — new requests paused"
+        | Availability.Offline -> "○", Theme.inkMuted, "Offline"
     Border(
         Grid(coldefs = [ Auto; Star; Auto ], rowdefs = [ Auto ]) {
-            Label(if online then "●" else "○")
+            Label(dot)
                 .font(size = Theme.Font.headline)
-                .textColor(if online then Theme.success else Theme.inkMuted)
+                .textColor(dotColor)
                 .gridColumn(0)
                 .centerVertical()
-            Label(if online then "Online — visible for new jobs" else "Offline")
+            Label(text)
                 .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
                 .textColor(Theme.ink)
+                .lineBreakMode(LineBreakMode.WordWrap)
                 .gridColumn(1)
                 .centerVertical()
                 .padding(Thickness(Theme.Space.sm, 0., 0., 0.))
-            Switch(online, SetOnline)
-                .gridColumn(2)
-                .centerVertical()
+            match state with
+            | Availability.OnAJob -> ()
+            | _ ->
+                // Parenthesised: bare `state = ...` reads as a named argument.
+                Switch((state = Availability.Available), SetOnline)
+                    .gridColumn(2)
+                    .centerVertical()
         })
         .stroke(Theme.surfaceEdge)
         .strokeThickness(Theme.strokeHair)
@@ -170,7 +187,7 @@ let view (model: Model) =
             .font(size = Theme.Font.largeTitle, attributes = FontAttributes.Bold)
             .textColor(Theme.ink)
 
-        onlineRow model.Online
+        shiftRow (availability model)
 
         match activeJob model with
         | Some j ->
@@ -181,7 +198,8 @@ let view (model: Model) =
             activeJobCard model j
         | None -> ()
 
-        if model.Online then
+        match availability model with
+        | Availability.Available ->
             Label("Available jobs")
                 .font(size = Theme.Font.title3, attributes = FontAttributes.Bold)
                 .textColor(Theme.ink)
@@ -203,7 +221,21 @@ let view (model: Model) =
             else
                 for j in available do
                     availableJobRow model j
-        else
+
+        // The list is withheld rather than shown-and-refused. Offering rows a
+        // provider cannot act on would be the screen dangling work at someone
+        // already standing in a customer's kitchen, and it says plainly what
+        // brings them back rather than leaving them to find the toggle.
+        | Availability.OnAJob ->
+            Label("New requests are paused")
+                .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
+                .textColor(Theme.ink)
+                .padding(Thickness(0., Theme.Space.sm, 0., 0.))
+            Label("You're on a job. Mark it complete and the next requests come straight back.")
+                .font(size = Theme.Font.subhead)
+                .textColor(Theme.inkMuted)
+
+        | Availability.Offline ->
             Label("You're offline")
                 .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
                 .textColor(Theme.ink)

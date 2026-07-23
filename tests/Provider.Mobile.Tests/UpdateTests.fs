@@ -45,6 +45,27 @@ let ``activeJob is None when nothing in flight`` () =
     Assert.Equal(None, activeJob m |> Option.map (fun j -> j.Id))
 
 [<Fact>]
+let ``a job in flight takes the provider off the market`` () =
+    // The rule the provider's Home screen is built on: someone driving to, or
+    // standing at, a customer's address must not be offered other work.
+    let onShift = { Model.initial with Online = true }
+    Assert.Equal(Availability.Available, availability { onShift with Jobs = [mkJob 1 "Scheduled"] })
+    for state in [ "EnRoute"; "Arrived"; "InProgress" ] do
+        Assert.Equal(Availability.OnAJob, availability { onShift with Jobs = [mkJob 1 state] })
+    // Marking the work complete is what ends it — nothing else, and nothing
+    // stored. Completed is not in flight, so this needs no extra bookkeeping.
+    Assert.Equal(Availability.Available, availability { onShift with Jobs = [mkJob 1 "Completed"] })
+    Assert.Equal(Availability.Available, availability { onShift with Jobs = [mkJob 1 "Closed"] })
+
+[<Fact>]
+let ``on a job outranks off shift`` () =
+    // Telling a provider "Offline" while they stand in a customer's kitchen
+    // would be the screen contradicting the work in front of them.
+    let offShift = { Model.initial with Online = false }
+    Assert.Equal(Availability.Offline, availability offShift)
+    Assert.Equal(Availability.OnAJob, availability { offShift with Jobs = [mkJob 1 "InProgress"] })
+
+[<Fact>]
 let ``slider position interpolates and clamps`` () =
     Assert.Equal((5.0, 5.0), Slider.position (0.0, 0.0) (10.0, 10.0) 0.5)
     Assert.Equal((10.0, 10.0), Slider.position (0.0, 0.0) (10.0, 10.0) 1.7)
@@ -80,6 +101,33 @@ let up msg model = Update.update stubDeps msg model |> fst
 /// Same as `up`, argument order flipped for piping a model through several
 /// messages — which is how the notice queue has to be exercised at all.
 let up' msg model = up msg model
+
+[<Fact>]
+let ``finishing a job puts an off-shift provider back online`` () =
+    // The guard lives entirely in the emitted Cmd, which `up` discards — so
+    // this drains it against a recording stub instead. Without that the test
+    // would pass against an implementation that emits nothing at all.
+    let asked = ResizeArray<int * bool>()
+    let deps =
+        { stubDeps with
+            SetOnline = fun id online ->
+                asked.Add(id, online)
+                Task.FromResult(Error "unused") }
+    let session : Session = { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" }
+    let model =
+        { Model.initial with
+            Screen = ActiveJob 7; Session = Some session
+            Online = false; Jobs = [mkJob 7 "InProgress"] }
+    let _, cmd = Update.update deps (JobActioned (mkJob 7 "Completed")) model
+    cmd |> List.iter (fun sub -> sub ignore)
+    Assert.Contains((4, true), asked)
+
+    // …and a provider who was already on shift needs no call: availability is
+    // derived, so Home reopens the moment the job leaves the in-flight set.
+    asked.Clear()
+    let _, cmd2 = Update.update deps (JobActioned (mkJob 7 "Completed")) { model with Online = true }
+    cmd2 |> List.iter (fun sub -> sub ignore)
+    Assert.Empty(asked)
 
 [<Fact>]
 let ``login lands Home with session`` () =
