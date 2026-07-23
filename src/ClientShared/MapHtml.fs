@@ -5,14 +5,33 @@ module FixItHere.ClientShared.MapHtml
 ///
 /// NOTE: this is an F# format string. Every literal percent sign in the CSS or JS
 /// below must be written as `%%`, or the printf type-checker will read it as a
-/// placeholder. The four real placeholders are, in order: jobLat, jobLng,
-/// providerId, baseUrl.
+/// placeholder. The five real placeholders are, in order: jobLat, jobLng,
+/// providerId, baseUrl, destLabel.
 ///
 /// Unlike the /dev console — a dark operator instrument — this map renders inside
 /// the consumer app, so it stays light and legible against the product's own
 /// surface. The honey provider marker is the shared brand thread between them,
 /// and the destination is the FixItHere pin itself.
-let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) : string =
+/// The destination popup is baked into the page as a JS string literal that
+/// Leaflet then renders as HTML, so the text crosses two escaping boundaries.
+/// Names really do carry apostrophes here — the seed's own "Jack O'Brien" —
+/// and one unescaped would close the literal early and leave a page that
+/// simply never draws. Escaping to HTML entities settles both boundaries at
+/// once: the result contains no quote, backslash or angle bracket for either
+/// parser to trip on.
+let private popupText (s: string) =
+    s.Replace("&", "&amp;")
+     .Replace("\\", "&#92;")
+     .Replace("<", "&lt;")
+     .Replace(">", "&gt;")
+     .Replace("\"", "&quot;")
+     .Replace("'", "&#39;")
+
+/// `destLabel` names whoever is standing at the pin, in the reader's terms:
+/// "You" on the customer's tracking screen, the customer's name on the
+/// provider's. The page is shared by both apps and used to hardcode "You",
+/// which told a provider that their customer's doorstep was their own.
+let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) (destLabel: string) : string =
     sprintf """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -87,7 +106,7 @@ const pinSvg =
 const destIcon = L.divIcon({ className: "", html: pinSvg, iconSize: [28, 34], iconAnchor: [14, 34] });
 const carIcon  = L.divIcon({ className: "", html: '<div class="car"></div>',  iconSize: [18, 18], iconAnchor: [9, 9] });
 
-const dest = L.marker(jobPos, { icon: destIcon }).addTo(map).bindPopup("You");
+const dest = L.marker(jobPos, { icon: destIcon }).addTo(map).bindPopup("%s");
 
 /* The provider marker is created but NOT added until a real position arrives.
    It used to be initialised at jobPos, so before the first LocationUpdated both
@@ -161,4 +180,4 @@ fetch(baseUrl + "/location?providerId=" + providerId)
   .catch(() => {});
 
 setTimeout(() => { map.invalidateSize(); frame(); }, 400);
-</script></body></html>""" jobLat jobLng providerId baseUrl
+</script></body></html>""" jobLat jobLng providerId baseUrl (popupText destLabel)

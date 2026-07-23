@@ -25,14 +25,14 @@ open FixItHere.Shared
 /// actually depends on, so moving to a different job still rebuilds it.
 module private MapCache =
     let private cache =
-        System.Collections.Generic.Dictionary<struct (float * float * int), HtmlWebViewSource>()
+        System.Collections.Generic.Dictionary<struct (float * float * int * string), HtmlWebViewSource>()
 
-    let source (baseUrl: string) (lat: float) (lng: float) (providerId: int) =
-        let key = struct (lat, lng, providerId)
+    let source (baseUrl: string) (lat: float) (lng: float) (providerId: int) (destLabel: string) =
+        let key = struct (lat, lng, providerId, destLabel)
         match cache.TryGetValue key with
         | true, v -> v
         | _ ->
-            let v = HtmlWebViewSource(Html = MapHtml.render baseUrl lat lng providerId)
+            let v = HtmlWebViewSource(Html = MapHtml.render baseUrl lat lng providerId destLabel)
             cache[key] <- v
             v
 
@@ -204,7 +204,8 @@ let view (model: Model) (jobId: int) =
             (Grid(coldefs = [ Star ], rowdefs = [ Auto; Star; Auto; Auto; Auto ]) {
                 (statusCard model job).gridRow(0)
 
-                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(1)
+                // The customer's name, not "You" — this pin is their doorstep.
+                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId job.CustomerName).gridRow(1)
 
                 (lateControlsBar lateControlsVisible proposalPending job.Id)
                     .padding(Thickness(0., Theme.Space.xs, 0., Theme.Space.xs))

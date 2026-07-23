@@ -28,14 +28,14 @@ open FixItHere.Shared
 /// actually depends on, so moving to a different job still rebuilds it.
 module private MapCache =
     let private cache =
-        System.Collections.Generic.Dictionary<struct (float * float * int), HtmlWebViewSource>()
+        System.Collections.Generic.Dictionary<struct (float * float * int * string), HtmlWebViewSource>()
 
-    let source (baseUrl: string) (lat: float) (lng: float) (providerId: int) =
-        let key = struct (lat, lng, providerId)
+    let source (baseUrl: string) (lat: float) (lng: float) (providerId: int) (destLabel: string) =
+        let key = struct (lat, lng, providerId, destLabel)
         match cache.TryGetValue key with
         | true, v -> v
         | _ ->
-            let v = HtmlWebViewSource(Html = MapHtml.render baseUrl lat lng providerId)
+            let v = HtmlWebViewSource(Html = MapHtml.render baseUrl lat lng providerId destLabel)
             cache[key] <- v
             v
 
@@ -154,7 +154,7 @@ let view (model: Model) (jobId: int) =
                     .padding(Thickness(0., Theme.Space.xs, 0., Theme.Space.xs))
                     .gridRow(1)
 
-                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId).gridRow(2)
+                WebView(MapCache.source Config.baseUrl job.Lat job.Lng job.ProviderId "You").gridRow(2)
 
                 (HStack(spacing = Theme.Space.sm) {
                     Button("Call", StartFakeCall)
