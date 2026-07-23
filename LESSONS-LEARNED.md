@@ -60,15 +60,19 @@
 
 ---
 
-### 2026-07-23 — A Cmd here is not inert: the effect fires when the Cmd is built, not when it is dispatched
+### 2026-07-23 — A task-based Cmd can fire before it is dispatched
 
-**Insight:** `apiCmd` is `Cmd.ofTaskMsg (task { … })` ([Update.fs:10](src/Provider.Mobile/Update.fs)). F#'s `task { }` is **hot** — it begins executing when the expression is evaluated. The HTTP call therefore happens while `update` is *constructing* the `Cmd`, not when Fabulous later dispatches the returned sub. A `Cmd` that is built and then discarded has already performed its effect.
+**Insight:** `apiCmd` *was* `Cmd.ofTaskMsg (task { … })` ([Update.fs](src/Provider.Mobile/Update.fs)), and `ofTaskMsg` takes an **already started** task — F#'s `task { }` is hot, beginning execution when the expression is evaluated. The HTTP call therefore happened while `update` was *constructing* the `Cmd`, not when Fabulous later dispatched the returned sub, so a `Cmd` built and then discarded had already performed its effect.
 
 **Discovery:** By a mutation test that failed to fail. To prove a new Cmd-draining test could go red, the effect was removed from the batch (`Cmd.batch [ …; (ignore backOnline; Cmd.none) ]`) — and the test still passed. The `let backOnline = apiCmd …` binding above it had already fired the call, so draining the Cmd was never what made the assertion true. Mutating the **guard** instead (`when not m.Online` → `when false`), so the Cmd is never constructed at all, turned it red as expected.
 
-**Impact:** Two consequences, and the first is the uncomfortable one. (1) A test that drains a `Cmd` may be passing because *construction* fired the effect rather than because dispatch did — so "I drained the Cmd" is weaker evidence than it looks, and a mutation that only removes the Cmd from the returned batch cannot distinguish the two. Mutate the construction, not the return. (2) In product code, building a Cmd speculatively and choosing not to return it is a live API call. Nothing currently does that knowingly; nothing checks either.
+**Impact:** Two consequences, and the first is the uncomfortable one. (1) A test that drains a `Cmd` may be passing because *construction* fired the effect rather than because dispatch did — so "I drained the Cmd" is weaker evidence than it looks, and a mutation that only removes the Cmd from the returned batch cannot distinguish the two. Mutate the construction, not the return. (2) In product code, building a Cmd speculatively and choosing not to return it is a live API call.
 
-**Related:** [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic); [Mutation is the only honest proof that a test can fail](#2026-07-19--mutation-is-the-only-honest-proof-that-a-test-can-fail) — this is that lesson applied to itself: the mutation's job was to test the test, and what it actually caught was a bad mutation; [Gap: effects fire at Cmd construction](#2026-07-23--effects-fire-at-cmd-construction-and-the-blast-radius-is-unaudited)
+**Resolution (2026-07-23):** `2f0ac1a` made `apiCmd` and `delayCmd` cold in both apps — the task is now built inside `Cmd.ofSub`, so nothing runs until dispatch — and added `apiCmd is cold` / `delayCmd is cold` to both suites, mutation-checked (restoring `Cmd.ofTaskMsg` turns the customer test red). The audit that ran first found **no** Cmd constructed and dropped anywhere, so consequence (2) never became a live defect. The *reasoning here stays permanently active*: F#'s `task { }` is hot, `Cmd.ofTaskMsg` takes an already-started task, and the rule "mutate the construction, not the presence in the returned batch" applies to every Cmd helper anyone writes next. Only the specific hot `apiCmd` retired.
+
+**Active mitigation:** `apiCmd is cold: no call until the Cmd is dispatched` and `delayCmd is cold: the clock starts on dispatch`, in both `tests/Customer.Mobile.Tests/UpdateTests.fs` and `tests/Provider.Mobile.Tests/UpdateTests.fs`. Without them the helper reverts silently the first time it is rewritten.
+
+**Related:** [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic); [Mutation is the only honest proof that a test can fail](#2026-07-19--mutation-is-the-only-honest-proof-that-a-test-can-fail) — this is that lesson applied to itself: the mutation's job was to test the test, and what it actually caught was a bad mutation; [Gap: effects fire at Cmd construction (archived, closed)](#2026-07-23--effects-fire-at-cmd-construction-and-the-blast-radius-is-unaudited)
 
 ---
 
@@ -1261,32 +1265,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
-### 2026-07-23 — Effects fire at Cmd construction, and the blast radius is unaudited
-
-**Current State:** `apiCmd`/`delayCmd` wrap a hot `task { }`, so the effect starts when the `Cmd` is built inside `update`, not when Fabulous dispatches it. Discovered while mutation-testing an unrelated fix.
-
-**Updated 2026-07-23 — the audit ran, and the gap is narrower than first written.** Item 1 below is closed: **no `Cmd` is constructed and then dropped anywhere in either app.** `grep -rn "let [A-Za-z_]* *= *\(apiCmd\|delayCmd\)"` over both apps returns nothing; the only `let`-bound command is `backOnline` in `Provider.Mobile/Update.fs` (bound to a `match` whose arms call `apiCmd`) and it is always returned in the batch, as are the `let cmd = match …` bindings in both `Navigate` arms. So there is **no invisible live API call and no product defect** — what remains is entirely about how much some tests prove.
-
-**Limitation:** The affected tests can now be named exactly, which the first write-up could not do. Only tests asserting on a **recording stub reached through `apiCmd`** are weakened, because the stub is called during `Update.update` whether or not the Cmd is drained — five of them: `finishing a job puts an off-shift provider back online`, `a restored session hydrates the shift flag`, and `a data reset drops the stale world and refetches` (both apps).
-
-The `runWith` typing/seen tests are **not** affected, and that distinction matters before anyone edits them: they go through `Cmd.ofSub (fun _ -> deps.SendTyping …)`, which is already cold, so their drain is load-bearing and their guards are genuinely covered.
-
-**Ideal Solution:** Make `apiCmd` cold — `Cmd.ofSub (fun dispatch -> (task { … }) |> ignore)` — so nothing runs until dispatch. The five tests above should stay green *for the right reason* rather than turn red (the stubs return `Task.FromResult`, so the deps call still happens synchronously inside the drained sub); any test that does go red was asserting on something else and needs reading.
-
-**Closing this gap requires:**
-1. Audit both apps for `Cmd`s constructed and conditionally dropped — ~15 min — ✅ **done 2026-07-23: none exist**
-2. Switch `apiCmd` **and `delayCmd`** to a cold wrapper in both apps — ~20 min — pending. `delayCmd` has the same shape, so its timer currently starts at construction; indistinguishable today, same latent trap.
-3. Re-run `Customer.Mobile.Tests` + `Provider.Mobile.Tests`; triage any newly-red test as "was asserting on construction" — ~30 min — pending
-4. **Add a test that proves `apiCmd` is cold** — construct against a recording stub, assert nothing recorded, drain, assert recorded — ~10 min — pending. This is the missing active mitigation: without it, item 2 silently reverts the first time the helper is rewritten and nothing anywhere fails.
-
-**Active mitigation:** None automatic yet — item 4 is it, and it is not written. The manual rule until then: **mutate the Cmd's construction, not its presence in the returned batch** — removing it from `Cmd.batch` proves nothing, which is the exact false negative that surfaced this.
-
-**Priority:** Medium — confirmed no live defect, but it silently weakens the one testing technique this project relies on for guard logic.
-
-**Related:** [Lesson: a Cmd here is not inert](#2026-07-23--a-cmd-here-is-not-inert-the-effect-fires-when-the-cmd-is-built-not-when-it-is-dispatched); [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic)
-
----
-
 ### 2026-07-23 — Seeded jobs are promised ~8 minutes out, so any accelerated run reads as late
 
 **Current State:** The seed places the first upcoming jobs at `Epoch + 8 / 25 / 55` minutes so a countdown is already ticking when the app opens (deliberate — see the demo-clock work). The customer's en-route countdown is reconciled against the *promised* arrival, so it turns red and reads "Late by …" once demo-now passes the promise.
@@ -1691,6 +1669,34 @@ The `runWith` typing/seen tests are **not** affected, and that distinction matte
 
 > Entries moved here when the underlying condition no longer applies.
 > Kept for historical context.
+
+### 2026-07-23 — Effects fire at Cmd construction, and the blast radius is unaudited
+
+**Current State:** `apiCmd`/`delayCmd` wrap a hot `task { }`, so the effect starts when the `Cmd` is built inside `update`, not when Fabulous dispatches it. Discovered while mutation-testing an unrelated fix.
+
+**Updated 2026-07-23 — the audit ran, and the gap is narrower than first written.** Item 1 below is closed: **no `Cmd` is constructed and then dropped anywhere in either app.** `grep -rn "let [A-Za-z_]* *= *\(apiCmd\|delayCmd\)"` over both apps returns nothing; the only `let`-bound command is `backOnline` in `Provider.Mobile/Update.fs` (bound to a `match` whose arms call `apiCmd`) and it is always returned in the batch, as are the `let cmd = match …` bindings in both `Navigate` arms. So there is **no invisible live API call and no product defect** — what remains is entirely about how much some tests prove.
+
+**Limitation:** The affected tests can now be named exactly, which the first write-up could not do. Only tests asserting on a **recording stub reached through `apiCmd`** are weakened, because the stub is called during `Update.update` whether or not the Cmd is drained — five of them: `finishing a job puts an off-shift provider back online`, `a restored session hydrates the shift flag`, and `a data reset drops the stale world and refetches` (both apps).
+
+The `runWith` typing/seen tests are **not** affected, and that distinction matters before anyone edits them: they go through `Cmd.ofSub (fun _ -> deps.SendTyping …)`, which is already cold, so their drain is load-bearing and their guards are genuinely covered.
+
+**Ideal Solution:** Make `apiCmd` cold — `Cmd.ofSub (fun dispatch -> (task { … }) |> ignore)` — so nothing runs until dispatch. The five tests above should stay green *for the right reason* rather than turn red (the stubs return `Task.FromResult`, so the deps call still happens synchronously inside the drained sub); any test that does go red was asserting on something else and needs reading.
+
+**Closing this gap requires:**
+1. Audit both apps for `Cmd`s constructed and conditionally dropped — ~15 min — ✅ **done 2026-07-23: none exist**
+2. Switch `apiCmd` **and `delayCmd`** to a cold wrapper in both apps — ~20 min — pending. `delayCmd` has the same shape, so its timer currently starts at construction; indistinguishable today, same latent trap.
+3. Re-run `Customer.Mobile.Tests` + `Provider.Mobile.Tests`; triage any newly-red test as "was asserting on construction" — ~30 min — pending
+4. **Add a test that proves `apiCmd` is cold** — construct against a recording stub, assert nothing recorded, drain, assert recorded — ~10 min — pending. This is the missing active mitigation: without it, item 2 silently reverts the first time the helper is rewritten and nothing anywhere fails.
+
+**Active mitigation:** None automatic yet — item 4 is it, and it is not written. The manual rule until then: **mutate the Cmd's construction, not its presence in the returned batch** — removing it from `Cmd.batch` proves nothing, which is the exact false negative that surfaced this.
+
+**Priority:** Medium — confirmed no live defect, but it silently weakens the one testing technique this project relies on for guard logic.
+
+**Related:** [Lesson: a task-based Cmd can fire before it is dispatched](#2026-07-23--a-task-based-cmd-can-fire-before-it-is-dispatched); [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic)
+
+**Archived 2026-07-23** — closed by `2f0ac1a`. All four items shipped: the audit found no Cmd constructed and dropped (so there was never a live defect), `apiCmd` and `delayCmd` are cold in both apps, both mobile suites were re-run with nothing newly red, and the coldness tests that keep it that way are in place.
+
+---
 
 ### 2026-07-19 — The in-app WebView map redesign has never been looked at
 

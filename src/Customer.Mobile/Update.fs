@@ -8,20 +8,32 @@ open FixItHere.Shared.Dtos
 open FixItHere.Customer
 
 /// Run an ApiDeps call; map Ok to a message, Error/exception to ApiError.
+/// Cold on purpose.
+///
+/// This was `Cmd.ofTaskMsg (task { … })`, and `ofTaskMsg` takes an *already
+/// started* task — F#'s `task { }` is hot, so the HTTP call left as soon as the
+/// expression was evaluated, while `update` was still assembling the Cmd and
+/// regardless of whether that Cmd was ever dispatched or even returned.
+/// Building the task inside the sub means nothing happens until Fabulous
+/// dispatches, which is what every test that drains a Cmd assumes it is
+/// proving. Found by a mutation that failed to fail; the `apiCmd is cold` test
+/// is what keeps it this way.
 let apiCmd (work: unit -> Task<Result<'a, string>>) (ok: 'a -> Msg) : Cmd<Msg> =
-    Cmd.ofTaskMsg (task {
-        try
-            match! work () with
-            | Ok v -> return ok v
-            | Error e -> return ApiError e
-        with ex -> return ApiError ex.Message
-    })
+    Cmd.ofSub (fun dispatch ->
+        task {
+            try
+                match! work () with
+                | Ok v -> dispatch (ok v)
+                | Error e -> dispatch (ApiError e)
+            with ex -> dispatch (ApiError ex.Message)
+        } |> ignore)
 
+/// Cold, for the same reason as `apiCmd`: hot, the delay started counting when
+/// the Cmd was built rather than when it was dispatched.
 let delayCmd (ms: int) (msg: Msg) : Cmd<Msg> =
-    Cmd.ofTaskMsg (task {
-        do! Task.Delay ms
-        return msg
-    })
+    Cmd.ofSub (fun dispatch ->
+        task { do! Task.Delay ms
+               dispatch msg } |> ignore)
 
 /// 250 ms, not 1000. At 60x a one-second tick advances demo time a full
 /// minute, and every countdown on screen visibly skips.

@@ -103,6 +103,35 @@ let up msg model = Update.update stubDeps msg model |> fst
 let up' msg model = up msg model
 
 
+
+[<Fact>]
+let ``apiCmd is cold: no call until the Cmd is dispatched`` () =
+    // The property the whole Cmd-draining technique rests on. It did NOT hold:
+    // `Cmd.ofTaskMsg` takes an already-started task, so building the Cmd fired
+    // the call, and a test could "drain" a Cmd while proving nothing about
+    // dispatch. Caught only by a mutation that failed to fail.
+    let calls = ResizeArray<string>()
+    let cmd =
+        Update.apiCmd
+            (fun () -> calls.Add "work"; Task.FromResult(Ok ([]: JobDto list)))
+            JobsLoaded
+    Assert.Empty(calls)
+    cmd |> List.iter (fun sub -> sub ignore)
+    Assert.Equal(1, calls.Count)
+
+[<Fact>]
+let ``delayCmd is cold: the clock starts on dispatch`` () =
+    // Same shape. Undispatched, a 10-minute delay must not already be running.
+    let dispatched = ResizeArray<Msg>()
+    let cmd = Update.delayCmd 0 GoBack
+    Assert.Empty(dispatched)
+    cmd |> List.iter (fun sub -> sub dispatched.Add)
+    // Task.Delay 0 completes on the thread pool, so allow it to land.
+    let deadline = System.DateTime.UtcNow.AddSeconds 2.0
+    while dispatched.Count = 0 && System.DateTime.UtcNow < deadline do
+        System.Threading.Thread.Sleep 10
+    Assert.Equal<Msg list>([GoBack], List.ofSeq dispatched)
+
 [<Fact>]
 let ``an error does not follow the user to the next screen`` () =
     let errored = up (ApiError "Job 81 not found") { Model.initial with Screen = Home }
