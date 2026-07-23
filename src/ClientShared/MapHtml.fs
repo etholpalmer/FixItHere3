@@ -10,7 +10,8 @@ module FixItHere.ClientShared.MapHtml
 ///
 /// Unlike the /dev console — a dark operator instrument — this map renders inside
 /// the consumer app, so it stays light and legible against the product's own
-/// surface. The amber provider marker is the shared brand thread between them.
+/// surface. The honey provider marker is the shared brand thread between them,
+/// and the destination is the FixItHere pin itself.
 let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) : string =
     sprintf """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,7 +20,6 @@ let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) :
   :root {
     --brand: oklch(0.72 0.15 80);
     --ink: oklch(0.22 0.01 85);
-    --dest: oklch(0.55 0.17 255);
     --ring: oklch(1 0 0);
   }
   html, body, #map { margin: 0; height: 100%%; }
@@ -27,18 +27,15 @@ let render (baseUrl: string) (jobLat: float) (jobLng: float) (providerId: int) :
   .leaflet-container { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .leaflet-control-attribution { font-size: 10px; opacity: 0.7; }
 
-  /* Destination: blue, the convention for "you are here" on every map app the
-     audience has ever used. Dark-on-white read as a generic pin and, worse, sat
-     invisible under the amber provider marker whenever the two coincided. */
-  .dest {
-    width: 16px; height: 16px;
-    border-radius: 50%%;
-    background: var(--dest);
-    border: 3px solid var(--ring);
-    box-shadow: 0 1px 5px oklch(0.2 0 0 / 0.4);
-  }
+  /* Destination: the FixItHere mark itself — the brand's red map pin, with its
+     tip on the coordinate. A pin asserts "this exact doorstep" in a way a dot
+     never can, and red-teardrop against honey-circle separates the two markers
+     by *shape* as well as colour, so they stay legible even overlapping.
+     The shadow is a filter, not box-shadow: it has to follow the teardrop's
+     silhouette rather than square off around it. */
+  .pin { display: block; filter: drop-shadow(0 2px 4px oklch(0.2 0 0 / 0.45)); }
 
-  /* Provider: brand amber, with a halo that breathes so the eye finds the
+  /* Provider: the brand honey, with a halo that breathes so the eye finds the
      moving marker without it stealing focus from the route. */
   .car {
     position: relative;
@@ -73,15 +70,30 @@ const jobPos = [%f, %f], providerId = %d, baseUrl = "%s";
 const map = L.map("map", { zoomControl: false, attributionControl: true }).setView(jobPos, 12);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
 
-const destIcon = L.divIcon({ className: "", html: '<div class="dest"></div>', iconSize: [16, 16], iconAnchor: [8, 8] });
+/* The app icon's foreground, inlined. The page ships as a bare HTML string with
+   no bundled assets, so it cannot reference Resources/AppIcon/appiconfg.svg —
+   this is a hand-copy of it and must be updated alongside it. The viewBox is
+   cropped to the pin's own bounding box (x 112–400, y 96–448 in the 512 source)
+   so the rendered box *is* the pin, with no transparent margin to guess at.
+   iconAnchor is therefore bottom-centre: the tip, not the middle. Anchoring a
+   pin like a dot would silently plant it half its height north of the address. */
+const pinSvg =
+  '<svg class="pin" width="28" height="34" viewBox="112 96 288 352" xmlns="http://www.w3.org/2000/svg">'
++ '<path fill="#EA4335" d="M256 96c-79.5 0-144 64.5-144 144 0 39.4 23.5 82.8 53 120.7 29.3 37.6 63.6 68.3 82.5 84.3a13 13 0 0 0 17 0c18.9-16 53.2-46.7 82.5-84.3 29.5-37.9 53-81.3 53-120.7 0-79.5-64.5-144-144-144z"/>'
++ '<circle cx="256" cy="232" r="62" fill="#1D3557"/>'
++ '<path fill="#FFFFFF" d="M285 205a29 29 0 0 1-36 36l-28 28a10 10 0 0 1-15 0l-2-3a10 10 0 0 1 0-14l28-28a29 29 0 0 1 36-36l-16 16a7 7 0 0 0 0 10l7 7a7 7 0 0 0 10 0z"/>'
++ '</svg>';
+
+const destIcon = L.divIcon({ className: "", html: pinSvg, iconSize: [28, 34], iconAnchor: [14, 34] });
 const carIcon  = L.divIcon({ className: "", html: '<div class="car"></div>',  iconSize: [18, 18], iconAnchor: [9, 9] });
 
 const dest = L.marker(jobPos, { icon: destIcon }).addTo(map).bindPopup("You");
 
 /* The provider marker is created but NOT added until a real position arrives.
    It used to be initialised at jobPos, so before the first LocationUpdated both
-   markers occupied the same coordinate and the amber one painted over the blue
-   — the map showed a single dot and looked like it had lost the customer. */
+   markers occupied the same coordinate and the honey circle painted over the
+   destination — the map showed one marker and looked like it had lost the
+   customer. */
 const car = L.marker(jobPos, { icon: carIcon });
 let carPlaced = false;
 
