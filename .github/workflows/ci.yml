@@ -1,16 +1,19 @@
 name: CI
 
-# PAUSED 2026-07-20 — manual trigger only, nothing runs automatically.
-# The workflow is intact; the believability rebuild will churn the tests and
-# DTOs heavily (SeedTests' fingerprint is a compile dependency, and the Shared
-# DTO changes break four test files by design), so automatic red is noise
-# rather than signal for that stretch.
+# RE-ENABLED 2026-07-23. Paused on 2026-07-20 for the believability rebuild,
+# which churned the DTOs and SeedTests' compile-time fingerprint hard enough
+# that automatic red was noise rather than signal. That stretch is finished and
+# the suite is green (212 tests across the four projects).
 #
-# TO RE-ENABLE: restore the two lines below and delete this block.
-#   push:
-#   pull_request:
-#     branches: [main]
+# KNOWN: GitHub Actions is currently blocked on an account billing issue, so
+# runs will fail or refuse to start for reasons that have nothing to do with
+# this repository. Red here does NOT mean red locally — reproduce with the four
+# `dotnet test` commands in the Tests job before believing a failure. Revert to
+# `workflow_dispatch:` alone if the noise outweighs the signal.
 on:
+  push:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 # A newer push to the same branch makes an in-flight run obsolete.

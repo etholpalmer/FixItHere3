@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, and the demo pair that shared no job)
+- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair that shared no job, and cold Cmd helpers. CI re-enabled; five stale gaps archived)
 
 ---
 
@@ -1245,6 +1245,25 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Solution Gaps
 
+### 2026-07-23 — CI is re-enabled but GitHub Actions is blocked on billing
+
+**Current State:** `.github/workflows/ci.yml` was restored to `push:` + `pull_request:` on 2026-07-23, after being paused since 2026-07-20 for the believability rebuild's DTO churn. The suite it runs is green — 212 tests across the four projects. But Actions is blocked by an account billing issue, so runs fail or refuse to start for reasons unrelated to this repository.
+
+**Limitation:** The gate exists and does not gate. Worse than not having it: a *red* CI badge that means "billing", not "broken", trains everyone to ignore red — which is exactly the state a required check is supposed to prevent. The re-enable was made with that known and accepted; the workflow's header comment says so, so a contributor meeting a failure knows to reproduce locally before believing it.
+
+**Closing this gap requires:**
+1. Resolve the GitHub Actions billing issue on the account — not a code change, and not something this repo can do — pending
+2. Confirm the first real run is green on `ubuntu-latest` (tests) — ~10 min once (1) clears — pending
+3. Decide whether the iOS `-t:Compile` gate belongs in the same job or a small macOS one, and make the Tests job a required check on `main` — ~30 min — pending
+
+**Active mitigation:** The four `dotnet test` commands and the two `-f net10.0-ios -t:Compile` builds are the real gate meanwhile, run locally before every commit this session. Never `dotnet test` the `.slnx` — it pulls in the mobile TFMs and fails for environment reasons.
+
+**Priority:** Medium — nothing is unverified today because the local gate is being run, but that depends entirely on discipline, which is what CI exists to replace.
+
+**Related:** [Environment-dependent failures cannot be gated by pre-flight probes](#2026-07-20--environment-dependent-failures-cannot-be-gated-by-pre-flight-probes-build-then-classify); [Mistake: an unverified probe justified removing continue-on-error](#2026-07-20--an-unverified-probe-justified-removing-continue-on-error-and-turned-green-runs-red)
+
+---
+
 ### 2026-07-23 — An accepted job is indistinguishable from an unclaimed one
 
 **Current State:** A provider's Home lists their `Scheduled` jobs under "Available jobs". Tapping **Accept** does not change the job's state — the machine's own `Scheduled, Accepted -> Ok Scheduled` is state-preserving by design — and the DTO carries no acceptance marker, so the job reappears in the same list looking untaken. The provider can tap into it and be offered "Accept Job" a second time.
@@ -1314,45 +1333,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
-### 2026-07-22 — The two-app walkthrough is only half run
-
-**Current State:** Sign-in, job isolation with two live clients, booking through the real flow, the booking appearing live on the provider, accept, and the full running-late propose/answer loop are all verified on two simulators with screenshots.
-
-**Limitation:** Depart, chat across two devices (typing indicator and seen receipts crossing), arrive, start work, complete, **payment**, and **rating** have never been exercised on two real apps. Payment is the significant one — the customer's total beside the provider's payout is the marketplace story and the screen an investor studies.
-
-**Updated 2026-07-23 — the walkthrough was run end to end; one item remains.** A real booking (customer → Mike's Plumbing) appeared live on the provider, was accepted, ran the full running-late propose/accept/retarget loop across both devices, then depart → arrive → work → complete, landing the provider on **Payout $235.88** and the customer on **Paid $313.58** (subtotal $277.50, +13% HST vs −15% platform fee — the two figures differing is the marketplace proof), both rated, job `Closed`, and the provider's public average moved 3.7 (3) → 4.0 (4) without the provider→customer rating polluting it. The run found three defects, all since fixed: [no drive on depart](#2026-07-23--departing-flipped-the-status-but-never-drove-the-provider), [the map never tracking](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch), and [notices covering titles](#2026-07-23--notices-expired-on-the-demo-clock-so-at-1x-they-never-cleared) — which is the fourth consecutive time the walkthrough earned its cost.
-
-**Closing this gap requires:**
-1. Boot both simulators, install current builds — ✅ shipped
-2. Drive depart → arrive → work → complete, watching the map and both countdowns — ✅ shipped
-3. Chat across devices, checking typing/seen cross the wire — **pending** (both Chat screens were opened and render correctly, but a message, typing indicator and seen receipt have still never been watched crossing between two live devices)
-4. Payment on both phones side by side — ✅ shipped
-5. Rating both ways, job closes — ✅ shipped
-
-**Priority:** Medium — down from High. The money and reschedule beats are verified; only the chat-crossing signal remains unproven, and it is the one beat whose failure would be least visible on stage.
-
-**Related:** [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
-
----
-
-### 2026-07-22 — Four presentation defects found by the walkthrough, deferred to Phase 4
-
-**Current State:** Catalog shows bare trade names; `ProviderList` shows `★0.0 (0)` for unrated providers; all of a provider's reviews are attributed to one customer; `JobDetail`'s countdown is not urgency-coloured.
-
-**Limitation:** Each is a visible tell. None is behavioural.
-
-**Ideal Solution:** Fix with the redesign of the screen each lives on, rather than twice.
-
-**Closing this gap requires:**
-1. Render `ServiceDto.FromPrice` in Catalog ("Plumbing · from $277") — pending, plan task 14
-2. `★0.0 (0)` → "New" in ProviderList — pending, plan task 14
-3. `Seed.fs`: draw raters from customers other than the job's own; re-verify the determinism fingerprint — pending
-4. `urgencyColor` on JobDetail's countdown — pending, plan task 16
-
-**Priority:** Medium — deferred deliberately, tracked so it cannot be lost.
-
----
-
 ### 2026-07-22 — Two simulators are at the edge of this machine's headroom
 
 **Current State:** Running the customer and provider apps on two booted simulators worked, but the customer simulator shut itself down once mid-walkthrough and needed rebooting, and two `tap` calls failed with "the simulator likely rebooted" before succeeding on retry.
@@ -1364,60 +1344,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 **Priority:** Medium — it does not block, but it makes the acceptance step flaky.
 
 **Related:** [Gap: no disk-headroom check before/during long MAUI build-heavy agentic sessions](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
-
----
-
-### 2026-07-20 — Verified live defects surfaced by plan audit; none yet fixed
-
-**Current State:** A three-lens audit of the believability plan surfaced defects in the *shipped* code that no prior review, test or walkthrough had caught. Every one below was verified against source or the running system.
-
-**Updated 2026-07-20 — Phase 0 closed items 1, 2, 3, 4 and 5.** Remaining: 6 (scripted demo's ephemeral chat), 7 (double-rating), 8 (back re-books), 9 (five state-string dependants — documented, not yet consolidated), 10 (unbounded `VStack`s, which an iPhone viewport will clip). Items 6–8 are plan task 7; item 10 is task 12.
-
-| # | Defect | Evidence | Severity |
-|---|---|---|---|
-| 1 | **"Developer Settings" is a button on both apps' Home screens**, leading to Teleport / Simulated-GPS / route-percentage / Start-Demo controls. Provider Chat ships a labelled Auto-Reply `Switch` | `Customer/Views/Home.fs:19`, `Provider/Views/Home.fs:28`, `Provider/Views/Chat.fs:36-38` | **Fatal for a demo** |
-| 2 | **Neither app has a login** — `Login.fs` is *"Who's booking today?"* over five hardcoded first names | both `Views/Login.fs` | **Fatal for a demo** |
-| 3 | **Ratings collide across id spaces.** `Rating` has no role column; provider→customer rating writes `RateeId = job.CustomerId`, while the public query filters `RateeId = providerId`. Both sequences run 1–20, so **each completed demo loop mutates a provider's public star average** | `Db.fs:29-30`, `Provider/Update.fs:180`, `Endpoints.fs:30,174` | **High** — same class as the message-identity bug already fixed |
-| 4 | **Every customer's Home accumulates strangers' jobs.** `JobUpdated` broadcasts to `Clients.All` and `Customer/Update.fs:167` appends any unseen job | `Hub.fs:20`, `Customer/Update.fs:163-174` | **High** — cross-tenant leakage on the first screen |
-| 5 | Live-booked jobs render `Address = "My location"` | `Customer/Update.fs:69` → `JobDetail.fs:15` | Medium |
-| 6 | Scripted demo injects chat with `Id = 0` that is never persisted: the second is deduped away, the customer-role one renders as **"You: Hi!"** in the customer's own app, and both vanish on navigation | `DevEndpoints.fs:52-62` | Medium |
-| 7 | Scripted demo double-rates — `runTimeline` applies its own 5-star "Great demo!" *and* `RateAndClose` while the customer app is already on Rating | `DevEndpoints.fs` | Medium |
-| 8 | Back-navigation re-books: `JobCreated` pushes Tracking onto Booking, so back-back-tap creates a duplicate job | `Customer/Update.fs:71-73` | Medium |
-| 9 | Job state has **five** string dependants, not the three previously documented — the extra two are `Provider/Domain.fs:160` (`inFlight` list) and `DevEndpoints.fs:32-75` (`runTimeline`'s hardcoded happy path) | — | Medium — corrects an earlier entry |
-| 10 | Only `Chat.fs` has a `ScrollView`; Home, Catalog, ProviderList, JobDetail are unbounded `VStack`s | both `Views/` | Medium — bites the moment any narrower layout ships |
-
-**Closing this gap requires:**
-1. Strip demo scaffolding from both apps' shipping surface; move route control to `/dev` — ✅ shipped `8bdf06d`
-2. Replace the name-picker login with a real-looking sign-in — ✅ shipped `2d888f4`
-3. Add a role column to `Rating` and scope the public query — ✅ shipped `71d610e`
-4. Job-scoped SignalR groups replacing `Clients.All` — ✅ shipped `637a1e3`
-5. `Address = "My location"` on booked jobs — pending, folded into Phase 1 task 1 (geography)
-6. Items 6–10 — roughly a day — pending, Phase 2 task 7 and Phase 3 task 12
-
-**Priority:** High — items 1 and 2 are visible within the first four seconds of any demo, before any feature has a chance to argue otherwise.
-
-**Related:** [Lesson: adversarial multi-lens audit](#2026-07-20--adversarial-multi-lens-audit-finds-the-class-of-defect-the-author-is-structurally-blind-to)
-
----
-
-### 2026-07-19 — The Mac Catalyst CI job cannot be a required check
-
-**Current State:** [.github/workflows/ci.yml](.github/workflows/ci.yml) builds both apps for `net10.0-maccatalyst` on `macos-latest`, marked `continue-on-error: true`. The Tests job on ubuntu is the real gate and passes (96 tests, run 29680507369).
-
-**Limitation:** The job cannot currently succeed on the hosted image, and the reason is a genuine bind rather than a misconfiguration. `Microsoft.MacCatalyst.Sdk` 26.5.10301 requires **Xcode 26.6**, and while the image's 26.6 passes every standalone check — same Build 17F113 as a working local install, SDK present, exact-call probe green — the identical xcodebuild invocation fails with `SDK cannot be located` **when run under MSBuild**. **Updated 2026-07-20:** the earlier "missing platform SDK" diagnosis was an approximation; the failure is context-dependent, not install-dependent, which is why every install-inspection strategy failed (see the build-then-classify lesson).
-
-**Why it still earns its place:** the test projects compile `Domain`/`Update`/`Api` but never `Views/*.fs` or `MauiProgram.fs`. This job is the only thing that would catch a broken view, and views were edited repeatedly during this work.
-
-**Closing this gap requires:**
-1. Wait for the image/toolchain combination to work — the build-then-classify design detects this automatically: the first run whose builds succeed simply gates, with no workflow change needed — pending, zero work ✅ (mechanism shipped in `e328b88`)
-2. Or pin the MacCatalyst workload to a version matching a working Xcode on the image — an hour, and re-pins on every SDK bump — pending
-3. Or self-host a macOS runner with a known-good Xcode — half a day plus ongoing maintenance — pending
-
-**Active mitigation:** `continue-on-error` is gone. The job builds and classifies: environment-signature failures annotate and exit 0 (verified live — run 29717326198 is green with the skip notice over a failed underlying build); any other failure gates, so a broken view blocks the merge the moment the image starts working.
-
-**Priority:** Medium — the gap is real coverage, but the local `dotnet build -f net10.0-maccatalyst` still catches the same class of breakage on a developer machine.
-
-**Related:** [Mistake: CI went red on its first run](#2026-07-19--ci-went-red-on-its-first-run-because-the-test-suite-was-never-re-run-after-the-redesign)
 
 ---
 
@@ -1442,27 +1368,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
-### 2026-07-18 — Task 12's two-app manual acceptance walk and final per-task review were not completed before disk exhaustion interrupted the session
-
-**Current State:** Commit `cec1e7c` ("docs: Provider.Mobile run instructions; prototype acceptance complete") landed with all 78 automated tests passing and both mobile apps building cleanly for `net10.0-maccatalyst`. However, per this project's standing execution/review split (Sonnet 5 implements, Opus 4.8 reviews each task's diff — see the plan's "Execution profile"/"Reviewer checklist" sections in [docs/superpowers/plans/2026-07-18-provider-mobile.md](docs/superpowers/plans/2026-07-18-provider-mobile.md)), the final task's Opus review had not yet been dispatched, and the plan's Task 12 Step 2 (a manual two-app-side-by-side click-through: online toggle, accept, live GPS tracking, chat typing/seen, auto-reply, fake payment, ratings, both apps' in-app Start Demo buttons, `/dev` Reset Demo) had not been independently re-driven interactively in this session — the disk-exhaustion incident interrupted verification before either step ran.
-
-**Limitation:** There is also no tool in this environment analogous to Playwright for web apps that can drive a running native Mac Catalyst window — a MAUI/Fabulous UI can't currently be click-tested by the agent itself the way a browser-rendered page can via the Browser pane tools. Even absent the disk incident, Task 12 Step 2 would have needed either the user to drive it manually or a native UI-automation tool this project doesn't have wired up.
-
-**Recommended Improvement:** Now that disk headroom is restored (~5.2GB free as of this writing), dispatch the deferred Opus review pass over the Task 12 diff, and explicitly ask the user to perform (or confirm they already performed) the two-app manual walkthrough from the plan's Step 2 — don't infer it happened just because the commit message says "acceptance complete."
-
-**Updated 2026-07-19:** the review shipped and its findings are remediated, but the walkthrough itself is still outstanding — and it now matters *more*, not less. The review returned **BLOCK with 15 findings**, four of them user-visible defects on the primary demo path that no test caught. Every one was found by reading code or driving the API, never by running the apps. Both apps now launch and reach the backend (the port bug is fixed), so the walkthrough is finally possible; it has simply not been done.
-
-**Closing this gap requires:**
-1. Dispatch the Opus 4.8 review pass for the final task's diff per the standing execution-profile — ✅ shipped 2026-07-19; returned BLOCK, findings remediated across `1f3b309`, `6927691`, `b36ef79`
-2. Get explicit user confirmation of the two-app manual acceptance walk (Step 2 of Task 12), or perform it together interactively — pending; both apps launch cleanly and the demo pair (John + Mike's Plumbing) now works after the identity fix
-3. Longer-term: evaluate whether any native macOS UI-automation tool (e.g., XCUITest driven headlessly, or `cliclick`/AppleScript against the built `.app`) could give the agent a Playwright-equivalent for MAUI/Mac Catalyst windows — not started, speculative
-
-**Priority:** High — still the last open item, and the review demonstrated empirically that static analysis alone missed four defects a single walkthrough would have surfaced.
-
-**Related:** [Gap: no disk-headroom check before/during long MAUI build-heavy agentic sessions](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
-
----
-
 ### 2026-07-18 — Typing/Seen hub relay has no automated test; verified manually only
 
 **Current State:** The SignalR `Typing`/`Seen` hub relay (provider ↔ customer typing indicator and read-receipt) added in Provider.Mobile Tasks 7/9 and mirrored into Customer.Mobile Task 11 has no automated backend hub test — `grep` across `tests/Backend.Api.Tests` for `Typing`/`Seen` returns nothing. The plan's own self-review notes call this out explicitly: "hub relay (Typing/Seen) is manually verified (no automated hub-method test) — accepted for the demo, noted in the spec's testing posture."
@@ -1475,7 +1380,9 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 1. Stand up an in-process SignalR test harness (two `HubConnection`s against the `WebApplicationFactory`'s `TestServer`) — roughly half a day given no existing precedent in this repo for hub-level testing — pending
 2. Write the actual relay-assertion tests for `Typing` and `Seen` — an hour once the harness exists — pending
 
-**Priority:** Low for the prototype's current scope (explicitly accepted in the plan's self-review), but the first thing to add if this project graduates past demo status.
+**Updated 2026-07-23 — this now carries the one item the two-app walkthrough never reached.** Chat *crossing* two devices has not only gone untested automatically, it has never been **watched live** either: every other beat of the demo has been driven on two simulators and screenshotted, but the typing indicator and seen receipts appearing on the opposite phone have not. So the relay currently has neither of its two possible forms of evidence. Watching it once on two simulators is ~15 minutes and worth doing before the harness work, because it is the cheaper of the two and answers "does it work at all" rather than "will it keep working".
+
+**Priority:** Low for the prototype's current scope (explicitly accepted in the plan's self-review), but the first thing to add if this project graduates past demo status. The **live watch** above is a separate, higher priority — it is the last unverified beat in the demo.
 
 **Related:** [Compromise: net10.0 instead of the plan's net8.0](#2026-07-18--targeted-net100-instead-of-the-designed-net80)
 
@@ -1669,6 +1576,130 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 > Entries moved here when the underlying condition no longer applies.
 > Kept for historical context.
+
+### 2026-07-18 — Task 12's two-app manual acceptance walk and final per-task review were not completed before disk exhaustion interrupted the session
+
+**Current State:** Commit `cec1e7c` ("docs: Provider.Mobile run instructions; prototype acceptance complete") landed with all 78 automated tests passing and both mobile apps building cleanly for `net10.0-maccatalyst`. However, per this project's standing execution/review split (Sonnet 5 implements, Opus 4.8 reviews each task's diff — see the plan's "Execution profile"/"Reviewer checklist" sections in [docs/superpowers/plans/2026-07-18-provider-mobile.md](docs/superpowers/plans/2026-07-18-provider-mobile.md)), the final task's Opus review had not yet been dispatched, and the plan's Task 12 Step 2 (a manual two-app-side-by-side click-through: online toggle, accept, live GPS tracking, chat typing/seen, auto-reply, fake payment, ratings, both apps' in-app Start Demo buttons, `/dev` Reset Demo) had not been independently re-driven interactively in this session — the disk-exhaustion incident interrupted verification before either step ran.
+
+**Limitation:** There is also no tool in this environment analogous to Playwright for web apps that can drive a running native Mac Catalyst window — a MAUI/Fabulous UI can't currently be click-tested by the agent itself the way a browser-rendered page can via the Browser pane tools. Even absent the disk incident, Task 12 Step 2 would have needed either the user to drive it manually or a native UI-automation tool this project doesn't have wired up.
+
+**Recommended Improvement:** Now that disk headroom is restored (~5.2GB free as of this writing), dispatch the deferred Opus review pass over the Task 12 diff, and explicitly ask the user to perform (or confirm they already performed) the two-app manual walkthrough from the plan's Step 2 — don't infer it happened just because the commit message says "acceptance complete."
+
+**Updated 2026-07-19:** the review shipped and its findings are remediated, but the walkthrough itself is still outstanding — and it now matters *more*, not less. The review returned **BLOCK with 15 findings**, four of them user-visible defects on the primary demo path that no test caught. Every one was found by reading code or driving the API, never by running the apps. Both apps now launch and reach the backend (the port bug is fixed), so the walkthrough is finally possible; it has simply not been done.
+
+**Closing this gap requires:**
+1. Dispatch the Opus 4.8 review pass for the final task's diff per the standing execution-profile — ✅ shipped 2026-07-19; returned BLOCK, findings remediated across `1f3b309`, `6927691`, `b36ef79`
+2. Get explicit user confirmation of the two-app manual acceptance walk (Step 2 of Task 12), or perform it together interactively — pending; both apps launch cleanly and the demo pair (John + Mike's Plumbing) now works after the identity fix
+3. Longer-term: evaluate whether any native macOS UI-automation tool (e.g., XCUITest driven headlessly, or `cliclick`/AppleScript against the built `.app`) could give the agent a Playwright-equivalent for MAUI/Mac Catalyst windows — not started, speculative
+
+**Priority:** High — still the last open item, and the review demonstrated empirically that static analysis alone missed four defects a single walkthrough would have surfaced.
+
+**Related:** [Gap: no disk-headroom check before/during long MAUI build-heavy agentic sessions](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
+
+**Archived 2026-07-23** — superseded twice over. It refers to Task 12 of the *previous* plan (`docs/superpowers/plans/2026-07-18-provider-mobile.md`) and to a Mac Catalyst target that no longer exists. The believability plan replaced that acceptance walk with its own, which has now been run end to end on two iOS simulators, and the agent *can* drive a native UI here — `xcrun simctl` plus the simulator MCP tools, which the entry assumed were unavailable.
+
+---
+
+### 2026-07-19 — The Mac Catalyst CI job cannot be a required check
+
+**Current State:** [.github/workflows/ci.yml](.github/workflows/ci.yml) builds both apps for `net10.0-maccatalyst` on `macos-latest`, marked `continue-on-error: true`. The Tests job on ubuntu is the real gate and passes (96 tests, run 29680507369).
+
+**Limitation:** The job cannot currently succeed on the hosted image, and the reason is a genuine bind rather than a misconfiguration. `Microsoft.MacCatalyst.Sdk` 26.5.10301 requires **Xcode 26.6**, and while the image's 26.6 passes every standalone check — same Build 17F113 as a working local install, SDK present, exact-call probe green — the identical xcodebuild invocation fails with `SDK cannot be located` **when run under MSBuild**. **Updated 2026-07-20:** the earlier "missing platform SDK" diagnosis was an approximation; the failure is context-dependent, not install-dependent, which is why every install-inspection strategy failed (see the build-then-classify lesson).
+
+**Why it still earns its place:** the test projects compile `Domain`/`Update`/`Api` but never `Views/*.fs` or `MauiProgram.fs`. This job is the only thing that would catch a broken view, and views were edited repeatedly during this work.
+
+**Closing this gap requires:**
+1. Wait for the image/toolchain combination to work — the build-then-classify design detects this automatically: the first run whose builds succeed simply gates, with no workflow change needed — pending, zero work ✅ (mechanism shipped in `e328b88`)
+2. Or pin the MacCatalyst workload to a version matching a working Xcode on the image — an hour, and re-pins on every SDK bump — pending
+3. Or self-host a macOS runner with a known-good Xcode — half a day plus ongoing maintenance — pending
+
+**Active mitigation:** `continue-on-error` is gone. The job builds and classifies: environment-signature failures annotate and exit 0 (verified live — run 29717326198 is green with the skip notice over a failed underlying build); any other failure gates, so a broken view blocks the merge the moment the image starts working.
+
+**Priority:** Medium — the gap is real coverage, but the local `dotnet build -f net10.0-maccatalyst` still catches the same class of breakage on a developer machine.
+
+**Related:** [Mistake: CI went red on its first run](#2026-07-19--ci-went-red-on-its-first-run-because-the-test-suite-was-never-re-run-after-the-redesign)
+
+**Archived 2026-07-23** — moot. Mac Catalyst was removed entirely in plan task 0e; `grep -rn maccatalyst` over `src/` and `.github/` returns nothing. The iOS `-t:Compile` gate replaced it, and CI was re-enabled on 2026-07-23.
+
+---
+
+### 2026-07-20 — Verified live defects surfaced by plan audit; none yet fixed
+
+**Current State:** A three-lens audit of the believability plan surfaced defects in the *shipped* code that no prior review, test or walkthrough had caught. Every one below was verified against source or the running system.
+
+**Updated 2026-07-20 — Phase 0 closed items 1, 2, 3, 4 and 5.** Remaining: 6 (scripted demo's ephemeral chat), 7 (double-rating), 8 (back re-books), 9 (five state-string dependants — documented, not yet consolidated), 10 (unbounded `VStack`s, which an iPhone viewport will clip). Items 6–8 are plan task 7; item 10 is task 12.
+
+| # | Defect | Evidence | Severity |
+|---|---|---|---|
+| 1 | **"Developer Settings" is a button on both apps' Home screens**, leading to Teleport / Simulated-GPS / route-percentage / Start-Demo controls. Provider Chat ships a labelled Auto-Reply `Switch` | `Customer/Views/Home.fs:19`, `Provider/Views/Home.fs:28`, `Provider/Views/Chat.fs:36-38` | **Fatal for a demo** |
+| 2 | **Neither app has a login** — `Login.fs` is *"Who's booking today?"* over five hardcoded first names | both `Views/Login.fs` | **Fatal for a demo** |
+| 3 | **Ratings collide across id spaces.** `Rating` has no role column; provider→customer rating writes `RateeId = job.CustomerId`, while the public query filters `RateeId = providerId`. Both sequences run 1–20, so **each completed demo loop mutates a provider's public star average** | `Db.fs:29-30`, `Provider/Update.fs:180`, `Endpoints.fs:30,174` | **High** — same class as the message-identity bug already fixed |
+| 4 | **Every customer's Home accumulates strangers' jobs.** `JobUpdated` broadcasts to `Clients.All` and `Customer/Update.fs:167` appends any unseen job | `Hub.fs:20`, `Customer/Update.fs:163-174` | **High** — cross-tenant leakage on the first screen |
+| 5 | Live-booked jobs render `Address = "My location"` | `Customer/Update.fs:69` → `JobDetail.fs:15` | Medium |
+| 6 | Scripted demo injects chat with `Id = 0` that is never persisted: the second is deduped away, the customer-role one renders as **"You: Hi!"** in the customer's own app, and both vanish on navigation | `DevEndpoints.fs:52-62` | Medium |
+| 7 | Scripted demo double-rates — `runTimeline` applies its own 5-star "Great demo!" *and* `RateAndClose` while the customer app is already on Rating | `DevEndpoints.fs` | Medium |
+| 8 | Back-navigation re-books: `JobCreated` pushes Tracking onto Booking, so back-back-tap creates a duplicate job | `Customer/Update.fs:71-73` | Medium |
+| 9 | Job state has **five** string dependants, not the three previously documented — the extra two are `Provider/Domain.fs:160` (`inFlight` list) and `DevEndpoints.fs:32-75` (`runTimeline`'s hardcoded happy path) | — | Medium — corrects an earlier entry |
+| 10 | Only `Chat.fs` has a `ScrollView`; Home, Catalog, ProviderList, JobDetail are unbounded `VStack`s | both `Views/` | Medium — bites the moment any narrower layout ships |
+
+**Closing this gap requires:**
+1. Strip demo scaffolding from both apps' shipping surface; move route control to `/dev` — ✅ shipped `8bdf06d`
+2. Replace the name-picker login with a real-looking sign-in — ✅ shipped `2d888f4`
+3. Add a role column to `Rating` and scope the public query — ✅ shipped `71d610e`
+4. Job-scoped SignalR groups replacing `Clients.All` — ✅ shipped `637a1e3`
+5. `Address = "My location"` on booked jobs — pending, folded into Phase 1 task 1 (geography)
+6. Items 6–10 — roughly a day — pending, Phase 2 task 7 and Phase 3 task 12
+
+**Priority:** High — items 1 and 2 are visible within the first four seconds of any demo, before any feature has a chance to argue otherwise.
+
+**Related:** [Lesson: adversarial multi-lens audit](#2026-07-20--adversarial-multi-lens-audit-finds-the-class-of-defect-the-author-is-structurally-blind-to)
+
+**Archived 2026-07-23** — every row is closed. Items 1–5 shipped in Phase 0 and Phase 1 (commit refs in the checklist above). Items 6, 7 and 8 shipped in plan task 7 — `DevEndpoints.fs` now persists scripted chat and no longer double-rates (both carry comments naming the old behaviour), and `Customer/Update.fs` uses `Nav.resetTo` so back-navigation cannot re-book. Item 10 shipped in task 12: all five previously-unbounded screens now open with a `ScrollView` (`grep -c ScrollView` returns 1 for each). Item 9 was a *correction to documentation*, not a defect — the five state-string dependants are recorded in the plan's executor note 4.
+
+---
+
+### 2026-07-22 — Four presentation defects found by the walkthrough, deferred to Phase 4
+
+**Current State:** Catalog shows bare trade names; `ProviderList` shows `★0.0 (0)` for unrated providers; all of a provider's reviews are attributed to one customer; `JobDetail`'s countdown is not urgency-coloured.
+
+**Limitation:** Each is a visible tell. None is behavioural.
+
+**Ideal Solution:** Fix with the redesign of the screen each lives on, rather than twice.
+
+**Closing this gap requires:**
+1. Render `ServiceDto.FromPrice` in Catalog ("Plumbing · from $277") — pending, plan task 14
+2. `★0.0 (0)` → "New" in ProviderList — pending, plan task 14
+3. `Seed.fs`: draw raters from customers other than the job's own; re-verify the determinism fingerprint — pending
+4. `urgencyColor` on JobDetail's countdown — pending, plan task 16
+
+**Priority:** Medium — deferred deliberately, tracked so it cannot be lost.
+
+**Archived 2026-07-23** — all four were fixed with the screens they lived on during Phase 4 (plan tasks 13–17, all complete). Verified in the running apps: Catalog carries copy beyond bare trade names, unrated providers read "New" via `Format.rating` rather than `★0.0 (0)`, reviewer diversity was fixed by the seed's lap offset, and JobDetail's countdown is urgency-coloured.
+
+---
+
+### 2026-07-22 — The two-app walkthrough is only half run
+
+**Current State:** Sign-in, job isolation with two live clients, booking through the real flow, the booking appearing live on the provider, accept, and the full running-late propose/answer loop are all verified on two simulators with screenshots.
+
+**Limitation:** Depart, chat across two devices (typing indicator and seen receipts crossing), arrive, start work, complete, **payment**, and **rating** have never been exercised on two real apps. Payment is the significant one — the customer's total beside the provider's payout is the marketplace story and the screen an investor studies.
+
+**Updated 2026-07-23 — the walkthrough was run end to end; one item remains.** A real booking (customer → Mike's Plumbing) appeared live on the provider, was accepted, ran the full running-late propose/accept/retarget loop across both devices, then depart → arrive → work → complete, landing the provider on **Payout $235.88** and the customer on **Paid $313.58** (subtotal $277.50, +13% HST vs −15% platform fee — the two figures differing is the marketplace proof), both rated, job `Closed`, and the provider's public average moved 3.7 (3) → 4.0 (4) without the provider→customer rating polluting it. The run found three defects, all since fixed: [no drive on depart](#2026-07-23--departing-flipped-the-status-but-never-drove-the-provider), [the map never tracking](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch), and [notices covering titles](#2026-07-23--notices-expired-on-the-demo-clock-so-at-1x-they-never-cleared) — which is the fourth consecutive time the walkthrough earned its cost.
+
+**Closing this gap requires:**
+1. Boot both simulators, install current builds — ✅ shipped
+2. Drive depart → arrive → work → complete, watching the map and both countdowns — ✅ shipped
+3. Chat across devices, checking typing/seen cross the wire — **pending** (both Chat screens were opened and render correctly, but a message, typing indicator and seen receipt have still never been watched crossing between two live devices)
+4. Payment on both phones side by side — ✅ shipped
+5. Rating both ways, job closes — ✅ shipped
+
+**Priority:** Medium — down from High. The money and reschedule beats are verified; only the chat-crossing signal remains unproven, and it is the one beat whose failure would be least visible on stage.
+
+**Related:** [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
+
+**Archived 2026-07-23** — the walkthrough ran end to end (see the 2026-07-23 Updated block above: booking → accept → running-late loop → depart → arrive → work → complete → both payment screens → both ratings → `Closed`). The title's claim is no longer true. **One item did not retire and is carried forward:** chat *crossing* two devices — typing indicator and seen receipts — has still never been watched live, and is now tracked on its own in [Typing/Seen hub relay has no automated test](#2026-07-18--typingseen-hub-relay-has-no-automated-test-verified-manually-only).
+
+---
 
 ### 2026-07-23 — Effects fire at Cmd construction, and the blast radius is unaudited
 
