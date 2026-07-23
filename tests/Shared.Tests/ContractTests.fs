@@ -260,6 +260,25 @@ let ``ETA is never zero for a provider still moving`` () =
     Assert.Equal(Travel.minMinutes, Travel.minutesFor 0.005)
     Assert.Equal(Travel.minMinutes, Travel.minutesFor 0.4)
 
+[<Fact>]
+let ``a provider at the door stops counting and says so`` () =
+    // The floor above has a second face: once someone has *stopped*, "1 min"
+    // is no longer an estimate, it is a number that never changes. Held on
+    // screen it reads as a frozen app rather than as an imminent doorbell.
+    Assert.True(Travel.isImminent (Travel.minutesFor 0.0))
+    Assert.True(Travel.isImminent (Travel.minutesFor 0.4))
+    Assert.False(Travel.isImminent (Travel.minutesFor 8.0))
+    Assert.Contains("arriving now", Travel.describe 0.0)
+    Assert.Contains("ETA", Travel.describe 8.0)
+
+    // …and the countdown must follow, or the two numbers on the tracking
+    // screen contradict each other again.
+    let sched = { PromisedStart = DemoClock.epoch.AddMinutes 30.0; Pending = None }
+    let atDoor = Countdown.forCustomer EnRoute sched (Some (Travel.minutesFor 0.0)) DemoClock.epoch
+    Assert.Equal(Some "Arriving now", atDoor |> Option.map Countdown.oneLine)
+    let stillDriving = Countdown.forCustomer EnRoute sched (Some (Travel.minutesFor 12.0)) DemoClock.epoch
+    Assert.Equal(Some "Arriving in 22:30", stillDriving |> Option.map Countdown.oneLine)
+
 [<Property>]
 let ``ETA grows with distance and stays finite`` (a: int) (b: int) =
     let near = float (abs a % 40)

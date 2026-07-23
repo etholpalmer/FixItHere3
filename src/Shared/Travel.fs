@@ -28,6 +28,16 @@ module Travel =
         if Double.IsNaN km || km <= 0.0 then minMinutes
         else max minMinutes (km / averageKmh * 60.0)
 
+    /// True once the estimate has bottomed out on the floor above — the
+    /// provider is at the door and the number has stopped meaning anything.
+    ///
+    /// The floor is what keeps "ETA 0 min" off the screen while someone is
+    /// still driving, but it has a second face: a provider who has *stopped*
+    /// leaves the customer watching "Arriving in 1:00" that never ticks down,
+    /// which reads as a frozen app rather than as a doorbell about to ring.
+    /// Callers use this to switch to arrival language instead of counting.
+    let isImminent (minutes: float) = minutes <= minMinutes
+
     let durationFor (km: float) = TimeSpan.FromMinutes(minutesFor km)
 
     /// When someone this far away has to leave to arrive on time — the number
@@ -39,4 +49,6 @@ module Travel =
     /// tracking screen and the provider's active job must not phrase the same
     /// fact two ways.
     let describe (km: float) =
-        sprintf "%.1f km away · ETA %s" km (Format.duration (int (round (minutesFor km))))
+        let minutes = minutesFor km
+        if isImminent minutes then sprintf "%.1f km away · arriving now" km
+        else sprintf "%.1f km away · ETA %s" km (Format.duration (int (round minutes)))

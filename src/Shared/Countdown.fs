@@ -89,6 +89,15 @@ module Countdown =
             else Some (at "Arriving in" "Late by" r.PromisedStart demoNow)
         | EnRoute ->
             match etaMinutes with
+            // The provider is at the door but has not tapped Arrived yet.
+            // Counting is over — the estimate has hit its floor and would sit
+            // at "Arriving in 1:00" for as long as they stand there, which
+            // reads as a stalled screen. Say the true thing instead. `oneLine`
+            // renders this as "Arriving now", so Home reads correctly too.
+            | Some mins when Travel.isImminent mins ->
+                Some { Label = "Arriving"
+                       Value = "now"
+                       Urgency = if demoNow > r.PromisedStart then Urgency.Overdue else Urgency.Urgent }
             | Some mins ->
                 let arrival = demoNow.AddMinutes mins
                 // The honest number is the later of the two: a provider who is
