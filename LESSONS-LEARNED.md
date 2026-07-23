@@ -10,11 +10,63 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-22 (Phases 0–3 complete; two-app walkthrough partially run; Phase 4 not started)
+- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability)
 
 ---
 
 ## Lessons
+
+### 2026-07-23 — The restore path keeps forgetting what the login path does ("restore-path divergence")
+
+**Insight:** This codebase has two ways to reach an authenticated Home — `LoggedIn` (fresh sign-in) and `SplashDone` → `RestoreSession` — and the second has now silently omitted work the first does **twice**: first the SignalR hub, then the provider's shift flag. Both omissions were invisible to every test project and to any walkthrough that begins with a fresh sign-in, which is the walkthrough an author naturally runs.
+
+**Discovery:** The second occurrence surfaced while verifying an unrelated feature. After relaunching the provider app, Home read "Offline" with an empty job list, while `GET /providers/1` returned `online: true`. The login arm fetches the provider *precisely* to avoid that and carries a comment saying so; the restore arm, fifteen lines away in the same `match`, never did.
+
+**Design intent:** Restore was added (task 0b) so a backgrounded app would not come back to a sign-in screen, which reads as an expired session. It was written as a *navigation* shortcut — get the user to Home — and the navigation is correct. What was never enumerated is the set of **startup side effects**; those had accreted on the login arm one at a time, so each new one had to be remembered twice by whoever added it.
+
+**Impact:** The class generalises past this app: whenever a second route into a state is added, every side effect wired to the first route is a candidate omission, and the author is structurally unlikely to notice because they test the route they just built. Where the effect can be keyed on the *state* rather than the message, that is the durable fix — the hub is keyed on `m.Session` now for exactly this reason. Where it must be a one-shot fetch, the two arms should share one function.
+
+**Active mitigation:** None yet, and that is the honest state. The concrete one is a shared `startupCmds (s: Session) : Cmd<Msg> list` called by both arms in each app, so a new startup effect can only be added in one place — roughly twenty minutes' work, not done. Until then the rule is manual: **grep both arms whenever either changes.**
+
+**Related:** [Mistake: a restored provider session was shown Offline with no jobs](#2026-07-23--a-restored-provider-session-was-shown-offline-with-no-jobs); [Mistake: a restored session connected to no live hub](#2026-07-22--a-restored-session-connected-to-no-live-hub)
+
+---
+
+### 2026-07-23 — A Cmd here is not inert: the effect fires when the Cmd is built, not when it is dispatched
+
+**Insight:** `apiCmd` is `Cmd.ofTaskMsg (task { … })` ([Update.fs:10](src/Provider.Mobile/Update.fs)). F#'s `task { }` is **hot** — it begins executing when the expression is evaluated. The HTTP call therefore happens while `update` is *constructing* the `Cmd`, not when Fabulous later dispatches the returned sub. A `Cmd` that is built and then discarded has already performed its effect.
+
+**Discovery:** By a mutation test that failed to fail. To prove a new Cmd-draining test could go red, the effect was removed from the batch (`Cmd.batch [ …; (ignore backOnline; Cmd.none) ]`) — and the test still passed. The `let backOnline = apiCmd …` binding above it had already fired the call, so draining the Cmd was never what made the assertion true. Mutating the **guard** instead (`when not m.Online` → `when false`), so the Cmd is never constructed at all, turned it red as expected.
+
+**Impact:** Two consequences, and the first is the uncomfortable one. (1) A test that drains a `Cmd` may be passing because *construction* fired the effect rather than because dispatch did — so "I drained the Cmd" is weaker evidence than it looks, and a mutation that only removes the Cmd from the returned batch cannot distinguish the two. Mutate the construction, not the return. (2) In product code, building a Cmd speculatively and choosing not to return it is a live API call. Nothing currently does that knowingly; nothing checks either.
+
+**Related:** [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic); [Mutation is the only honest proof that a test can fail](#2026-07-19--mutation-is-the-only-honest-proof-that-a-test-can-fail) — this is that lesson applied to itself: the mutation's job was to test the test, and what it actually caught was a bad mutation; [Gap: effects fire at Cmd construction](#2026-07-23--effects-fire-at-cmd-construction-and-the-blast-radius-is-unaudited)
+
+---
+
+### 2026-07-23 — A clamp that protects one half of its domain breaks the other ("guard with a second face")
+
+**Insight:** `Travel.minMinutes = 1.0` floors the ETA so that a provider visibly crossing the map never shows "ETA 0 min". The justification is written into the code and is correct — *for a provider who is moving*. The clamp also applies to a provider who has **stopped**, and there it produces a number that can never change: the customer's screen held "Arriving in 1:00" for as long as the provider stood at the door, and a countdown that never reaches zero reads as a frozen app rather than an imminent doorbell.
+
+**Design intent:** The floor exists to prevent a false *impression* — 0 looks like a broken readout, not an arrival. That reasoning was applied to exactly one region of the input domain and then shipped as a rule over all of it.
+
+**Impact:** The general form: a floor, ceiling, clamp or default is a statement about the **whole** domain but is almost always argued from one region of it. When adding one, name the region the argument covers and ask what the value means outside that region. Here the answer was that outside the moving case the number has stopped being an estimate at all — so the fix was not a lower floor but to stop counting and change the words ("Arriving now").
+
+**Related:** [Mistake: "Arriving in 1:00" never reached zero](#2026-07-23--arriving-in-100-never-reached-zero)
+
+---
+
+### 2026-07-23 — Derive state that another change can invalidate, never store it
+
+**Insight:** Third application of the same principle in this codebase, and the first time it was reached for deliberately rather than after a bug. The demo clock pushes an affine *map* so no client holds a timer (a moved deadline cannot strand a callback). Provider availability now follows it: "can this provider be offered work" is computed from the jobs list every frame (`Domain.availability`) rather than kept as a second flag beside `Online`. Storing it would mean every path that changes a job's state also has to remember to change the flag — the exact shape of the stale-timer bugs this project has already paid for twice.
+
+**Discovery:** Not from a failure. Writing the "provider on a job is off the market" rule, the obvious implementation was a `PausedForJob: bool` on the model, and the reason not to was recognised from the clock's design rather than from a new incident.
+
+**Impact:** The test for whether to derive or store is not "how often is it read" but **"how many places can invalidate it".** Availability can be invalidated by every job transition, a hub push, a reload and a shift toggle — five writers to one flag, or zero writers and one function. It also made the feature's hardest edge disappear: nothing has to "turn availability back on" when a job completes, because the job leaving the in-flight set *is* the change.
+
+**Related:** [Compromise: sessions in plain `Preferences`](#2026-07-22--sessions-are-stored-in-plain-preferences-not-securestorage) (the opposite call — stored deliberately, with the condition to revisit written down)
+
+---
 
 ### 2026-07-23 — A defect can be the only thing making a feature work ("accidental mechanism")
 
@@ -437,6 +489,88 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Mistakes & Fixes
 
+### 2026-07-23 — A restored provider session was shown Offline with no jobs
+
+**Symptom:** Relaunching the provider app produced Home with the shift toggle off, "You're offline", and no available jobs — while the server had that provider online and the customer side could still see them.
+
+**Attempted:** Nothing, in the sense that matters: it was seen immediately on the first relaunch during verification of an unrelated feature. Caught by *running* it, the same technique as the [hub omission](#2026-07-22--a-restored-session-connected-to-no-live-hub) and the [rendering-defects lesson](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite).
+
+**Root Cause:** `Online` is server-owned (the seed marks providers online). The `LoggedIn` arm hydrates it via `GetProvider` → `ProviderHydrated`, with a comment recording that assuming the local default of `false` "otherwise hid the available-jobs list until 'Go Online' was pressed". The `SplashDone` → `RestoreSession` arm fetched jobs and the clock but not the provider, so it reintroduced exactly the condition that comment describes — for every returning user, which is the normal case once stay-signed-in ships.
+
+**Fix:** Add the same `apiCmd (fun () -> deps.GetProvider s.UserId) ProviderHydrated` to the restore batch. `e4d6e9c`, [Update.fs](src/Provider.Mobile/Update.fs). Covered by a Cmd-draining test that asserts `GetProvider` is called for the restored user id.
+
+**Prevention:** Treat startup effects as belonging to the authenticated *state*, not to the message that produced it — see the named class below. This would also have shipped undetected without the availability work that made it visible: a provider stuck Offline looks like a toggle they forgot, not a bug.
+
+**Time Lost:** ~10 min (obvious once seen; the cost was that it had been latent since task 0b).
+
+**Severity:** Medium — cosmetic-looking but it disables the provider's entire job list on every relaunch, and it silently undermined the availability feature shipped in the same session.
+
+**Related:** [Lesson: restore-path divergence](#2026-07-23--the-restore-path-keeps-forgetting-what-the-login-path-does-restore-path-divergence)
+
+---
+
+### 2026-07-23 — "Arriving in 1:00" never reached zero
+
+**Symptom:** Reported from a screenshot: the customer's tracking screen read "Arriving in 1:00" beside "0.0 km away · ETA 1m", and stayed there. The provider had arrived; the countdown had not.
+
+**Attempted:** No dead ends — the contradiction between "0.0 km away" and "ETA 1m" on the same card pointed straight at the ETA formula.
+
+**Root Cause:** `Travel.minutesFor` floors at `minMinutes = 1.0`, which is correct while someone is driving and wrong once they have stopped: the estimate cannot fall further, so the countdown parks. The state is legitimate and can last indefinitely — a job stays `EnRoute` until the provider taps **Arrived**.
+
+**Fix:** `Travel.isImminent` (the estimate has bottomed out) drives both readouts: `Countdown.forCustomer` returns `Label = "Arriving"; Value = "now"` instead of counting, and `Travel.describe` drops the contradictory "ETA 1m". `oneLine` renders "Arriving now", so Home agrees with Tracking. `e2dede5`. Test asserts both the imminent and still-driving cases.
+
+**Prevention:** See the clamp lesson below — name the region a clamp's justification covers, and check what the clamped value means outside it.
+
+**Time Lost:** ~25 min including the live drive to reproduce.
+
+**Severity:** Medium — not wrong data, but a frozen number on the demo's centrepiece screen at the exact moment the audience is watching for arrival.
+
+**Related:** [Lesson: a clamp that protects one half of its domain](#2026-07-23--a-clamp-that-protects-one-half-of-its-domain-breaks-the-other-guard-with-a-second-face)
+
+---
+
+### 2026-07-23 — The shared map told the provider their customer's doorstep was "You"
+
+**Symptom:** Tapping the destination pin on the provider's active-job map popped up "You" — over the customer's address.
+
+**Attempted:** None; noticed while changing the marker artwork and confirmed by tapping the pin on both apps.
+
+**Root Cause:** `MapHtml.fs` is one page linked into both apps, and its popup text was a literal `"You"`. Correct on the customer's tracking screen, false on the provider's. A component shared by two roles carried one role's viewpoint baked in.
+
+**Fix:** `destLabel` is now a parameter — `"You"` from Tracking, `job.CustomerName` from ActiveJob. `8c1e2be`. The `MapCache` key gained the label so a changed name cannot serve a stale page.
+
+**The second half, which was the actual hazard:** the label is baked into the page as a **JS string literal that Leaflet then renders as HTML** — two escaping boundaries in one value. The seed's own "Jack O'Brien" carries an apostrophe that would have terminated the literal and left a page that never draws, i.e. a blank map with no error anywhere. `popupText` escapes to HTML entities, which settles both boundaries at once (the result contains no quote, backslash or angle bracket for either parser). Verified by rendering that exact name.
+
+**Prevention:** When a value crosses two parsers, escape for the *inner-most* one in a way the outer one cannot see — HTML entities inside a JS literal, here. And when a shared component contains user-facing copy, check every role that mounts it; the copy is a parameter even when it looks like a constant.
+
+**Time Lost:** ~20 min.
+
+**Severity:** Medium — the popup is one tap away on the provider's centrepiece screen, and the un-escaped-apostrophe variant would have been a silent blank map.
+
+**Related:** [MapHtml is a format string / accidental mechanism](#2026-07-23--a-defect-can-be-the-only-thing-making-a-feature-work-accidental-mechanism)
+
+---
+
+### 2026-07-23 — The provider's countdown row rendered as one clipped line of red
+
+**Symptom:** Reported from a screenshot: under "Available jobs", the row showed `ate — reportable as a no-show in 43:46` — cut off at both ends, with the trade, the customer and the payout pushed off-screen entirely.
+
+**Attempted:** None needed; the grid definition explains it once the string is known.
+
+**Root Cause:** The countdown was rendered as one interpolated string, `sprintf "%s %s" c.Label c.Value`, in the grid's `Auto` column. Countdown labels range from "Leave in" (8 chars) to "Late — reportable as a no-show in" (33); the long one made the `Auto` column claim the full width and starved the `Star` column holding everything else. The same string is set at title and large-title scale on both status cards, where it is simply wider than a phone. The labels grew when the no-show flow landed (task 11); the layouts that render them were never re-checked against the longest one.
+
+**Fix:** Split the caption from the clock — prose wraps in the column that has room, the clock keeps the narrow right-hand slot it always fits, and the scale contrast lands where it belongs (small words, large number). `875d307`, five views across both apps, plus `WordWrap` on the remaining single-line sites.
+
+**Prevention:** A shared copy type with a variable-length field needs its **longest** member tried against every layout that renders it — the copy and the layout live in different files and no test connects them. `Countdown.oneLine` exists for one-line contexts and is fine there; the defect was using the same shape in a constrained column.
+
+**Time Lost:** ~30 min including the live reproduction at the exact clock position that produces the long label.
+
+**Severity:** High — the provider's primary screen, unreadable, in the state the demo's headline beat ("running late") is designed to reach.
+
+**Related:** [Rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
+
+---
+
 ### 2026-07-23 — Departing flipped the status but never drove the provider
 
 **Symptom:** In the two-app walkthrough, tapping **Depart** moved the job to `EnRoute` but the provider's dot sat at its origin indefinitely. The markers never met, the map never closed in, and the customer's ETA never counted down — a normally-progressing job eventually read "Late by …", because the promised time passed while the ETA stood still.
@@ -515,7 +649,9 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 **Severity:** High — demo-critical, both apps, invisible to every test project (none compile `MauiProgram.fs`) and to a fresh-login walkthrough.
 
-**Related:** [Rendering defects...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); Compromise: [Sessions in plain `Preferences`](#2026-07-22--sessions-are-stored-in-plain-preferences-not-securestorage)
+**Updated 2026-07-23:** this recurred. The restore arm was found to omit the provider's shift-flag hydration as well, so the same divergence has now produced two separate demo-affecting defects; it is recorded as a named class in [restore-path divergence](#2026-07-23--the-restore-path-keeps-forgetting-what-the-login-path-does-restore-path-divergence), which also carries the mitigation neither fix has yet applied.
+
+**Related:** [Rendering defects...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); Compromise: [Sessions in plain `Preferences`](#2026-07-22--sessions-are-stored-in-plain-preferences-not-securestorage); [Mistake: a restored provider session was shown Offline](#2026-07-23--a-restored-provider-session-was-shown-offline-with-no-jobs)
 
 ---
 
@@ -1012,6 +1148,47 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 ---
 
 ## Solution Gaps
+
+### 2026-07-23 — An accepted job is indistinguishable from an unclaimed one
+
+**Current State:** A provider's Home lists their `Scheduled` jobs under "Available jobs". Tapping **Accept** does not change the job's state — the machine's own `Scheduled, Accepted -> Ok Scheduled` is state-preserving by design — and the DTO carries no acceptance marker, so the job reappears in the same list looking untaken. The provider can tap into it and be offered "Accept Job" a second time.
+
+**Limitation:** It reads as the app having ignored the tap. It also leaves a hole in the availability rule shipped in `5f9295d`: a provider goes off-market at **Depart**, not at **Accept**, so between the two they can still accept a second job.
+
+**Ideal Solution:** An acceptance fact on the job — `AcceptedAt: DateTimeOffset option` or an `Accepted` sub-status alongside the reschedule fields — surfaced in the DTO so both apps can distinguish "assigned to me" from "committed to by me". A committed job then renders as its own section, and availability keys on commitment rather than on in-flight.
+
+**Closing this gap requires:**
+1. Column + DTO field + `toJobDto` mapping, set by the `Accepted` transition — ~1 hour — pending
+2. `/dev` console updated for the new DTO field (it is a first-class client — executor note 19) — ~15 min — pending
+3. Provider Home: separate "Accepted — ready to depart" from "Available" — ~30 min — pending
+4. Decide whether `availability` keys on accepted-or-in-flight rather than in-flight, and say so in the copy — ~15 min — pending
+
+**Priority:** Medium — visible on the provider's first screen, but only to someone who accepts and then goes back, which the scripted demo does not do.
+
+**Related:** [Lesson: derive state that another change can invalidate](#2026-07-23--derive-state-that-another-change-can-invalidate-never-store-it)
+
+---
+
+### 2026-07-23 — Effects fire at Cmd construction, and the blast radius is unaudited
+
+**Current State:** `apiCmd`/`delayCmd` wrap a hot `task { }`, so the effect starts when the `Cmd` is built inside `update`, not when Fabulous dispatches it. Discovered while mutation-testing an unrelated fix; no code is known to depend on the difference, and no code is known to be safe from it either.
+
+**Limitation:** Two open questions nobody has answered. (1) Which existing Cmd-draining tests are passing because construction fired the effect rather than because the drain did — those tests are weaker than their names claim. (2) Whether any `update` arm constructs a `Cmd` it does not return, which would be an invisible live API call.
+
+**Ideal Solution:** Make `apiCmd` cold — `Cmd.ofSub (fun dispatch -> (task { … }) |> ignore)`, so nothing runs until dispatch — then re-run both mobile suites and see what changes. A test that goes red under a cold `apiCmd` was asserting on construction.
+
+**Closing this gap requires:**
+1. Grep both apps for `let … = apiCmd` bindings that are conditionally dropped — ~15 min — pending
+2. Switch `apiCmd` to a cold wrapper in both apps — ~20 min — pending
+3. Re-run `Customer.Mobile.Tests` + `Provider.Mobile.Tests` and triage any newly-red test as "was asserting on construction" — ~30 min — pending
+
+**Active mitigation:** None automatic. The manual rule, applied from now on: **mutate the Cmd's construction, not its presence in the returned batch** — removing it from `Cmd.batch` proves nothing.
+
+**Priority:** Medium — no known live defect, but it silently weakens the one testing technique this project relies on for guard logic.
+
+**Related:** [Lesson: a Cmd here is not inert](#2026-07-23--a-cmd-here-is-not-inert-the-effect-fires-when-the-cmd-is-built-not-when-it-is-dispatched); [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic)
+
+---
 
 ### 2026-07-23 — Seeded jobs are promised ~8 minutes out, so any accelerated run reads as late
 
