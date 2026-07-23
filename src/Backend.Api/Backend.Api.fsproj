@@ -23,6 +23,13 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <!-- Pin the SQLite bundle above the 2.1.11 that EF Core 10.0.10 pulls in:
+         that build's native e_sqlite3 carries GHSA-2m69-gcr7-jv3q (high). A
+         direct reference wins over the transitive one, so this lifts the whole
+         SQLitePCLRaw trio to 2.1.12 without waiting on an EF Core release.
+         Minor bump, same 2.1.x line — no API change. Remove once EF Core's
+         own dependency clears the advisory. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
 
 </Project>

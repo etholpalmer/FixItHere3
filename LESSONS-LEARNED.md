@@ -1270,10 +1270,10 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 **Closing this gap requires:**
 1. Stop filtering warnings out of build output — use `grep -E "error|warning|Build succeeded"` or read the tail — ~0 min, a habit — pending
-2. Bump `SQLitePCLRaw`/`Microsoft.Data.Sqlite` to a version past the advisory and confirm the suite still passes — ~30 min — pending
+2. Bump `SQLitePCLRaw` past the advisory and confirm the suite still passes — ✅ **shipped `c78d7dc`**: a direct `SQLitePCLRaw.bundle_e_sqlite3` 2.1.12 pin in `Backend.Api.fsproj` overrides the 2.1.11 EF Core 10.0.10 pulls in. `dotnet nuget why` confirms the whole trio resolves to 2.1.12 across every path including the test project (the pin propagates through the `ProjectReference`, so no second pin was needed); `NU1903` is gone from both projects; 48 backend tests still pass.
 3. Make the `Nullable` conversion explicit at `DevEndpoints.fs:172` rather than suppressing `FS3391` — ~10 min — pending
 
-**Priority:** Medium — no functional impact known, but one is a published security advisory and the other proves the local verification loop was reporting less than it claimed.
+**Priority:** Medium — the advisory (item 2) is resolved; what remains is the `FS3391` tidy-up and the durable habit of not filtering warnings, which is the finding that actually matters here.
 
 ---
 
