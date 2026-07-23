@@ -7,17 +7,20 @@ name: CI
 #
 # First run after re-enabling passed both jobs (Tests 1m10s, Build apps 2m14s).
 #
-# NOTE on what green means here. Two jobs, two different guarantees:
-#   - Tests (ubuntu): runs the four test suites AND a `-f net10.0-ios -t:Compile`
-#     view-code gate (added 2026-07-23). The compile gate needs the iOS ref packs
-#     but no Xcode, so it runs on Linux. This is the job that catches a view
-#     referencing a Msg/field/widget that no longer exists — the failure the test
-#     projects structurally cannot see, since they never compile Views/*.fs.
-#     UNCONFIRMED until the first run proves the iOS workload installs on ubuntu;
-#     if that step goes red for an environment reason, move it to a macos job.
-#   - build-apps (macOS): the FULL package build. It self-skips on this image's
+# NOTE on what green means here. Three jobs, three different guarantees:
+#   - Tests (ubuntu): the four test suites. Compiles Domain/Api/Update, never
+#     Views/*.fs or MauiProgram.fs.
+#   - compile-gate (macOS): `-f net10.0-ios -t:Compile` on both apps — the F#
+#     compiler over the view code, stopping before the asset pipeline (actool),
+#     so it needs no working Xcode. THIS is the job that catches a view
+#     referencing a Msg case, model field or widget that no longer exists, which
+#     the test projects structurally cannot see. Hard pass/fail.
+#     It lives on macOS because the iOS workload will not install on Linux at all
+#     ("Workload ID ios isn't supported on this platform" — confirmed on the
+#     2026-07-23 run that first tried it on ubuntu).
+#   - build-apps (macOS): the FULL package build. Self-skips on this image's
 #     actool-under-MSBuild defect and still reports success — see its annotation.
-#     It proves packaging when the image works; it does not gate view code.
+#     Proves packaging when the image works; does not gate view code.
 on:
   push:
   pull_request:
@@ -85,28 +88,32 @@ jobs:
           path: artifacts/tests
           if-no-files-found: ignore
 
-      # View-code gate. The four test projects compile Domain/Api/Update but
-      # never Views/*.fs or MauiProgram.fs, so a view referencing a Msg case,
-      # model field or widget that no longer exists ships green. `-t:Compile`
-      # runs the F# compiler and STOPS before the asset pipeline (actool), so it
-      # needs the iOS reference packs but no working Xcode — which is exactly why
-      # it can run here on Linux, where the macos `build-apps` job's full package
-      # build cannot. ~2s per app once the workload is present.
-      #
-      # `ios`, not `maui`: the full MAUI workload drags in Android, whose build
-      # needs a Java SDK (see the rejected `net10.0-android` canary in the plan).
-      # We only need the iOS compiler and its ref packs.
-      #
-      # Deliberately a HARD step, not skip-on-failure. If the iOS workload cannot
-      # install or evaluate net10.0-ios on Linux this goes RED, which is the
-      # signal to relocate it to a macos-latest job (per the plan's "confirm on
-      # the first run" note) — NOT to wrap it in an exit-0 skip, which would just
-      # recreate the "green means nothing was checked" trap the build-apps job
-      # already documents.
-      - name: Install iOS workload
-        run: dotnet workload install ios --skip-sign-check
+  # The view-code gate. `-t:Compile` runs the F# compiler and stops before the
+  # asset pipeline, so it needs the iOS ref packs (the `ios` workload) but no
+  # working Xcode — it therefore passes or fails purely on whether the view code
+  # compiles, cleanly separated from the actool defect that makes `build-apps`
+  # unreliable. ~2s per app once the workload is installed.
+  #
+  # macOS, not ubuntu: `dotnet workload install ios` fails on Linux with
+  # "Workload ID ios isn't supported on this platform" (confirmed 2026-07-23),
+  # so this cannot run on the cheaper ubuntu Tests job however much we'd prefer.
+  #
+  # `ios`, not `maui`: the compile gate needs only the iOS SDK/ref packs, and
+  # the narrower workload installs faster.
+  compile-gate:
+    name: View-code compile gate (iOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: View-code compile gate (net10.0-ios -t:Compile)
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install iOS workload
+        run: dotnet workload install ios
+
+      - name: Compile both apps (net10.0-ios -t:Compile)
         run: |
           set -o pipefail
           for proj in src/Customer.Mobile src/Provider.Mobile; do
@@ -115,8 +122,9 @@ jobs:
           done
 
   # The test projects compile Domain/Update/Api but NOT Views/*.fs or
-  # MauiProgram.fs — those are only ever compiled by the app projects. Without
-  # this job a broken view ships green.
+  # MauiProgram.fs — those are only ever compiled by the app projects. The
+  # compile-gate job above is the real view-code check; this job additionally
+  # attempts the FULL package build (the part that needs a working Xcode).
   #
   # Targets net10.0-ios: Mac Catalyst was dropped 2026-07-20 and the demo now
   # runs on the iOS Simulator.
