@@ -102,7 +102,9 @@ let ``rating a customer does not change the provider's public rating`` () =
     // A completed job, rated by its provider, about the CUSTOMER — who shares
     // the id 1 with Mike's Plumbing.
     let jobs = c.GetFromJsonAsync<Envelope<JobDto list>>("/jobs").Result.Data
-    let job = jobs |> List.find (fun j -> j.State = "Completed")
+    // Any finished job serves; seeded history is all Closed (a job never lingers
+    // in the transient Completed state), so match on that.
+    let job = jobs |> List.find (fun j -> j.State = "Closed")
     let req =
         { JobId = job.Id; RaterId = job.ProviderId; RaterRole = "Provider"
           RateeId = job.CustomerId; RateeRole = "Customer"
@@ -119,7 +121,9 @@ let ``rating a customer does not change the provider's public rating`` () =
 let ``customer-directed ratings stay out of the provider's public feedback`` () =
     use c = client ()
     let jobs = c.GetFromJsonAsync<Envelope<JobDto list>>("/jobs").Result.Data
-    let job = jobs |> List.find (fun j -> j.State = "Completed")
+    // Any finished job serves; seeded history is all Closed (a job never lingers
+    // in the transient Completed state), so match on that.
+    let job = jobs |> List.find (fun j -> j.State = "Closed")
     let req =
         { JobId = job.Id; RaterId = job.ProviderId; RaterRole = "Provider"
           RateeId = job.CustomerId; RateeRole = "Customer"

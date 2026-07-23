@@ -129,17 +129,23 @@ let run (db: AppDb) =
           CancelledBy = ""
           Lat = c.Lat; Lng = c.Lng
           Address = c.Address }
-    // 50 finished (alternate Completed/Closed), 30 pending
+    // 50 finished (all Closed), 30 pending.
+    //
+    // Every finished job is `Closed`, not an alternating mix of Closed/Completed.
+    // `Completed` is the transient "work done, payment settling" state that lasts
+    // minutes; it is non-terminal, so a seeded `Completed` job from two weeks ago
+    // lingered on the customer's Home as "settling up" forever — a job that never
+    // closes is a louder tell than a tidy history. Historical work is Closed.
+    //
     // The customer index carries a "lap" offset (i / provs.Length) on top of i.
     // A provider recurs every provs.Length finished jobs (the provider index
     // steps by 3, coprime with the 20 providers), and without the offset the
     // customer index landed on the same value every lap — provider 0's closed
     // jobs all belonged to customer 0, so every review on its profile read
     // "John R.". A roster of one person reads as fabricated the moment you look.
-    // The offset gives each provider three consecutive, distinct customers.
+    // The offset gives each provider distinct customers across its reviews.
     let finished =
-        [ for i in 0 .. 49 ->
-            mkJob i (if i % 2 = 0 then "Closed" else "Completed") (i + i / provs.Length) (historyAt i) ]
+        [ for i in 0 .. 49 -> mkJob i "Closed" (i + i / provs.Length) (historyAt i) ]
     let pending =
         [ for i in 50 .. 79 ->
             let k = i - 50
