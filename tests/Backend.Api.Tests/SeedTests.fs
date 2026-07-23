@@ -38,6 +38,28 @@ let ``named personas exist with correct services`` () =
     check "Elite HVAC" "HVAC"
 
 [<Fact>]
+let ``the two prefilled logins share the soonest job`` () =
+    // The demo is two phones showing two sides of ONE job. Both apps prefill a
+    // sign-in — John Reyes and Mike's Plumbing — and the seed used to give them
+    // no live job in common at all: the customer's imminent job belonged to
+    // GearHeads Mobile and the provider's to Jack O'Brien, so opening both apps
+    // as shipped produced two screens watching unrelated worlds.
+    let db, conn = makeDb ()
+    use _ = conn
+    Seed.run db
+    let john = db.Customers.Single(fun c -> c.Name = "John Reyes")
+    let mike = db.Providers.Single(fun p -> p.BusinessName = "Mike's Plumbing")
+    let soonest =
+        db.Jobs.Where(fun j -> j.State = "Scheduled")
+        |> Seq.sortBy (fun j -> j.PromisedStart)
+        |> Seq.head
+    Assert.Equal(john.Id, soonest.CustomerId)
+    Assert.Equal(mike.Id, soonest.ProviderId)
+    // …and it is the one whose countdown is already running when the app opens,
+    // which is what makes it the job an operator reaches for first.
+    Assert.Equal(DemoClock.epoch.AddMinutes 8.0, System.DateTimeOffset.Parse soonest.PromisedStart)
+
+[<Fact>]
 let ``seed is deterministic across two runs`` () =
     // Fingerprints the fields the demo clock made load-bearing, not just the
     // three the original covered. F# format strings are type-checked, so this

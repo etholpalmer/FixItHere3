@@ -94,9 +94,10 @@ let run (db: AppDb) =
 
     /// Minutes past the epoch for the k-th upcoming job. The first three are
     /// deliberately imminent, and because pending jobs are handed to customers
-    /// in the same order, the soonest belongs to John Reyes — the demo login.
-    /// A countdown has to be visibly ticking the second the app opens, without
-    /// the operator touching the console first.
+    /// in the same order, the soonest belongs to John Reyes — the customer demo
+    /// login. (Its *provider* is pinned to the provider demo login separately;
+    /// see `pending` below.) A countdown has to be visibly ticking the second
+    /// the app opens, without the operator touching the console first.
     let upcomingAt k =
         let minutes =
             match k with
@@ -106,9 +107,9 @@ let run (db: AppDb) =
             | _ -> 60.0 * float (k - 2)
         DateTimeOffset.Parse(Epoch).AddMinutes minutes
 
-    let mkJob i state (customerIndex: int) (startsAt: DateTimeOffset) =
+    let mkJob i state (customerIndex: int) (providerIndex: int) (startsAt: DateTimeOffset) =
         let c = customers.[customerIndex % customers.Length]
-        let p = provs.[(i * 3) % provs.Length]
+        let p = provs.[providerIndex % provs.Length]
         { Id = 0; CustomerId = c.Id; ProviderId = p.Id; ServiceId = p.ServiceId
           State = state
           // Real invoices vary around the quote — the work runs long or short.
@@ -145,11 +146,23 @@ let run (db: AppDb) =
     // "John R.". A roster of one person reads as fabricated the moment you look.
     // The offset gives each provider distinct customers across its reviews.
     let finished =
-        [ for i in 0 .. 49 -> mkJob i "Closed" (i + i / provs.Length) (historyAt i) ]
+        [ for i in 0 .. 49 -> mkJob i "Closed" (i + i / provs.Length) (i * 3) (historyAt i) ]
+    // The soonest upcoming job belongs to *both* demo logins.
+    //
+    // Customer 0 (John Reyes) and provider 0 (Mike's Plumbing) are the two
+    // prefilled sign-ins. The customer half of that was already deliberate —
+    // pending jobs are handed out in customer order, so the 8-minute job is
+    // John's. The provider half was left to `(i * 3) % 20`, which gave it to
+    // GearHeads Mobile, and Mike's Plumbing's only upcoming job belonged to a
+    // different customer entirely. Open both apps on their prefilled accounts
+    // and the two phones watched unrelated worlds: no shared job to accept, no
+    // chat between them, and the two-sided demo this product exists to show
+    // could not be reached without switching an account first.
     let pending =
         [ for i in 50 .. 79 ->
             let k = i - 50
-            mkJob i "Scheduled" k (upcomingAt k) ]
+            let providerIndex = if k = 0 then 0 else i * 3
+            mkJob i "Scheduled" k providerIndex (upcomingAt k) ]
     db.Jobs.AddRange(finished @ pending) |> ignore
     db.SaveChanges() |> ignore
 
