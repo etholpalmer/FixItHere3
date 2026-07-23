@@ -16,6 +16,34 @@
 
 ## Lessons
 
+### 2026-07-23 — A defect can be the only thing making a feature work ("accidental mechanism")
+
+**Insight:** Before it was fixed, the tracking map reloaded its WebView about four times a second — the "flashing" bug. Every reload re-ran the page, and the page fetches the provider's position on load, so the marker *appeared* to track the drive. Memoising the source object stopped the reloads and, with them, the only mechanism that had ever moved that marker. The intended live path — the page's own SignalR subscription — had never worked once in the project's history.
+
+**Discovery:** The user reported that the two dots never meet. Chasing it showed the provider position advancing server-side and the ETA text counting down (11 km → 0 km) while the map marker sat still: the F# app's typed hub client was receiving positions, the map's own client was not.
+
+**Design intent:** the flashing fix was correct and remains correct — Fabulous re-set an attribute whose value was a new object each render. Nothing about it was wrong. It simply deleted an accident that had been standing in for a feature.
+
+**Impact — name the pattern: *accidental mechanism*.** When a defect incidentally performs a feature's job, repairing the defect regresses the feature, and the regression reads as the fix's fault. Hunt for it whenever you remove **repeated work** — a reload, a re-render, a poll, a retry, a redundant refresh. Ask what that repetition was *also* doing. Checklist item: after killing a redundant refresh, prove the thing it refreshed still updates by its *intended* path, not merely that the screen looks right at one instant.
+
+**Related:** [Mistake: memoised the map's HTML string but rebuilt its source object every render](#2026-07-22--memoised-the-maps-html-string-but-rebuilt-its-source-object-every-render) · [Mistake: the map never tracked live](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch) · [Mistake: no CORS policy](#2026-07-22--the-in-app-map-had-never-received-a-live-position-because-the-backend-had-no-cors-policy)
+
+---
+
+### 2026-07-23 — The scripted demo did work the product itself did not ("demo-path divergence")
+
+**Insight:** Driving the provider from its origin to the customer existed **only** inside the `/dev` scripted timeline's own interpolation loop. The real in-app **Depart** applied `DepartEnRoute` and nothing else. So "the provider drives to the customer, and the map closes in as they converge" — the centre of the tracking experience — looked implemented for the whole project's history, while the path a real user takes never moved the car at all.
+
+**Discovery:** Only surfaced by running the **two-app walkthrough manually** (tapping Depart in the provider app) instead of triggering the canned `/dev/demo/start`. The scripted demo had always been the thing that got run, so it had always looked fine.
+
+**Design intent:** task 0a deliberately pushed demo scaffolding off the product surface and into `/dev`. That was the right call. But the *behaviour* moved with the *controls* — the console ended up owning something the domain needed.
+
+**Impact — name the pattern: *demo-path divergence*.** When a scripted path owns behaviour the real path needs, the script becomes the only place the product works, and every rehearsal reinforces the illusion. When moving scaffolding out of a product, separate **controls** (belong in the operator console) from **behaviour** (belongs in the domain, fired by the real action). Rehearse at least once through the real user path, never only the canned one.
+
+**Related:** [Mistake: departing flipped the status but never drove the provider](#2026-07-23--departing-flipped-the-status-but-never-drove-the-provider)
+
+---
+
 ### 2026-07-22 — A screenshot verifies the *installed* binary, not the source
 
 **Insight:** `dotnet build -f net10.0-ios -t:Compile` proves the *source* compiles; it does **not** produce an installable `.app`. A screenshot taken after only a compile-gate shows whatever binary was last *installed* — which can be several edits stale. "It compiles", "it packages", and "it is the binary on the device" are three different claims.
@@ -24,7 +52,9 @@
 
 **Impact:** This is a third rung under the [rendering-defects lesson](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite): it is not enough to *look* — you must confirm you are looking at *this* code. Before any screenshot review, rebuild `-c Debug` and reinstall, or check the `.app` binary mtime against your last edit.
 
-**Related:** [Rendering defects are structurally invisible...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); Mistake: [A restored session connected to no live hub](#2026-07-22--a-restored-session-connected-to-no-live-hub)
+**Updated 2026-07-23 — it happened a third time, and the obvious verification is a trap.** Chasing the map bug, I edited `ClientShared/MapHtml.fs`, ran the compile gate, screenshotted, and again saw stale behaviour. Worse, the check I reached for to *prove* the fix was in the binary was useless: `grep` and `strings` over `Customer.Mobile.dll` found neither the new code nor the old. .NET keeps string literals in the metadata `#US` heap as UTF-16, so an ASCII `grep` cannot see a substring of a large format string, and `strings -e l` did not find it either. Both a false negative and a false positive are possible, so **binary grepping is not a verification mechanism here**. The only reliable checks are (a) `rm -rf obj/Debug/net10.0-ios bin/Debug/net10.0-ios`, rebuild `-c Debug`, reinstall, and (b) exercise the behaviour. Verify by *running*, not by inspecting.
+
+**Related:** [Rendering defects are structurally invisible...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite) · Mistake: [A restored session connected to no live hub](#2026-07-22--a-restored-session-connected-to-no-live-hub) · Mistake: [The map never tracked live](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch)
 
 ---
 
@@ -407,6 +437,68 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Mistakes & Fixes
 
+### 2026-07-23 — Departing flipped the status but never drove the provider
+
+**Symptom:** In the two-app walkthrough, tapping **Depart** moved the job to `EnRoute` but the provider's dot sat at its origin indefinitely. The markers never met, the map never closed in, and the customer's ETA never counted down — a normally-progressing job eventually read "Late by …", because the promised time passed while the ETA stood still.
+
+**Attempted:** First suspected the map. Traced the position source instead: `hub.LocationUpdated` is the only thing that moves a provider, and its only caller was the `/dev` scripted timeline's own `moveTo` loop. The provider app's GPS loop is gated on `UseRealGps`, which task 0a removed from the UI and which defaults false — so nothing in the real flow moved anyone. Caught by running the *real* path rather than the canned demo — see [Lesson: demo-path divergence](#2026-07-23--the-scripted-demo-did-work-the-product-itself-did-not-demo-path-divergence).
+
+**Root Cause:** Travel was implemented as a step of the *script*, not as a consequence of *departing*.
+
+**Fix:** Extract one shared interpolator — [src/Backend.Api/Movement.fs](src/Backend.Api/Movement.fs) `driveEnRoute` — and fire it when `DepartEnRoute` is applied: from the real `PUT /jobs/{id}/enroute` (fire-and-forget) and from `runTimeline` (awaited). It walks origin → customer over the ETA's worth of *demo* time, pushes `LocationUpdated` each step, and bails the moment the job leaves `EnRoute`. `runTimeline` now calls it instead of its own loop, so there is one interpolator rather than a fourth (executor note 10). Commit `6c76adb`.
+
+**Prevention:** State transitions that have a physical consequence should trigger that consequence in the domain, not rely on a caller to also simulate it. If a demo script is the only producer of some effect, the product does not have that effect.
+
+**Time Lost:** ~50 min including the shared-interpolator refactor.
+
+**Severity:** High — the tracking screen is the demo's centrepiece and its core motion existed only inside the script.
+
+**Related:** [Lesson: demo-path divergence](#2026-07-23--the-scripted-demo-did-work-the-product-itself-did-not-demo-path-divergence) · [Mistake: the map never tracked live](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch)
+
+---
+
+### 2026-07-23 — The map never tracked live: SignalR credentials and a casing mismatch
+
+**Symptom:** With the provider genuinely driving, the status card's ETA counted down (22 km → 0.0 km) while the map's amber marker stayed frozen at the origin and the view never zoomed in.
+
+**Attempted:** Assumed the earlier CORS fix had already made the page's SignalR work — it had not (see that entry's 2026-07-23 update). Briefly considered pushing positions into the WebView from F# instead. Loaded `/dev` in a browser and saw "Realtime connected", which isolated the fault to the null-origin page rather than the hub or the broadcast. A first fix for the casing alone did **not** help, which is what exposed the second cause.
+
+**Root Cause:** Two independent blockers, either one fatal on its own:
+1. The page is loaded as an HTML **string**, so its document origin is `null` and every hub request is cross-origin. SignalR's JS client defaults `withCredentials` to **true**, and the server's CORS is `AllowAnyOrigin` (no credentials) — a pairing browsers refuse. The negotiate was blocked and the socket never opened. The plain `fetch` on the same page worked because `fetch` sends no credentials cross-origin by default — which is precisely what **masked** the failure: the car was placed once and looked right.
+2. The handler read `l.lat` / `l.providerId` (camelCase) while the JSON hub protocol serialises the DTO PascalCase (`Lat` / `ProviderId`, matching the F# record the typed clients decode). Every push failed the id guard and was silently dropped.
+
+**Fix:** `withUrl(..., { withCredentials: false })` plus reading either casing, in [src/ClientShared/MapHtml.fs](src/ClientShared/MapHtml.fs). Commit `7b4ec6b`. Verified by driving a job end to end: the marker tracks the car and `fitBounds` closes the view from a regional view to street level as the dots converge.
+
+**Prevention:** A working `fetch` is **no evidence** of a working socket to the same origin — they differ on credentials, so one can succeed while the other is blocked. Test the streaming path explicitly. And when two clients decode the same event, confirm they agree on casing: a *typed* client succeeding says nothing about a hand-written one.
+
+**Time Lost:** ~70 min, including one dead end (casing-only fix) and one wasted stale-binary cycle.
+
+**Severity:** High — the live tracking map is the product's signature screen and had never worked by its intended path.
+
+**Related:** [Lesson: accidental mechanism](#2026-07-23--a-defect-can-be-the-only-thing-making-a-feature-work-accidental-mechanism) · [Mistake: no CORS policy](#2026-07-22--the-in-app-map-had-never-received-a-live-position-because-the-backend-had-no-cors-policy) · [Lesson: a screenshot verifies the installed binary](#2026-07-22--a-screenshot-verifies-the-installed-binary-not-the-source)
+
+---
+
+### 2026-07-23 — Notices expired on the demo clock, so at 1x they never cleared
+
+**Symptom:** Green "Payment Complete" / "Thanks!" banners sat over each screen's **title** and stayed there — at one point three stacked on the provider's Home, covering "Mike's Plumbing".
+
+**Attempted:** Reported by the user from a screenshot. An earlier pass had already restyled them as floating rounded cards, which made them read as notifications but did nothing about placement or lifetime.
+
+**Root Cause:** Two things. They were pinned to the top of the page, directly over every screen's header. And their expiry rode the **demo** clock (`Notify.lifetime` = 3 demo-minutes) — a deliberate earlier choice so that pausing the clock mid-sentence also pauses dismissal. That reasoning is right for *beats*, but it means a piece of chrome sits on screen for three **real** minutes at 1x.
+
+**Fix:** Move the stack to the bottom (`verticalOptions End` + bottom margin) and give each non-`Ask` notice a real-time `delayCmd 7000 (DismissNotice id)` at creation. `notify` now returns `Model * Cmd<Msg>` and its call sites batch the timer; `Ask` still waits for its answer. Both apps. Commit `df7f943`.
+
+**Prevention:** Anything the **user** perceives in real seconds — toast dismissal, spinners, debounce — must be timed in real seconds. Only things that model the simulated world should ride the demo clock. A variable-rate clock is the wrong timebase for chrome.
+
+**Time Lost:** ~35 min.
+
+**Severity:** Medium — cosmetic, but it obscured screen titles throughout the walkthrough.
+
+**Related:** [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite) — found by looking at a screenshot, invisible to every test.
+
+---
+
 ### 2026-07-22 — A restored session connected to no live hub
 
 **Symptom:** A job driven through its states server-side was invisible to the customer app parked on its tracking screen — the status never moved, no chat, no reschedule prompt. Only the client-side countdown pump was alive.
@@ -493,6 +585,8 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 **Prevention:** When memoising to defeat a diff, memoise the value the diff actually compares — not an input to it.
 
+**Updated 2026-07-23 — this correct fix removed the accident that was standing in for live tracking.** Each of those four-a-second reloads re-ran the page, which fetches the provider's position on load, so the marker had *appeared* to follow the car. Stopping the reloads revealed that the page's own SignalR subscription had never worked. Nothing here was wrong — but it is the canonical example of [accidental mechanism](#2026-07-23--a-defect-can-be-the-only-thing-making-a-feature-work-accidental-mechanism): after killing repeated work, verify what that repetition was *also* doing.
+
 **Time Lost:** ~40 min, plus hours shipped in a "fixed" state.
 
 **Severity:** High — the tracking map is the demo's centrepiece.
@@ -513,7 +607,9 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 **Prevention:** A WebView fed an HTML string is a null-origin client of your own API. Treat it as a third party.
 
-**Time Lost:** ~30 min.
+**Updated 2026-07-23 — this fix was necessary but *not sufficient*, and I recorded it as though it were complete.** Adding CORS unblocked the initial `fetch`, so the marker appeared and the entry was written as if live positions now flowed. They did not: SignalR's negotiate was still blocked, because its JS client sends credentials by default and `AllowAnyOrigin` cannot be paired with credentials — and even once connected, the handler read the wrong casing. The live path stayed dead for another day. The `fetch` succeeding is what made the incomplete fix look complete. See [Mistake: the map never tracked live](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch). **The general error: verifying a two-path feature (fetch + socket) by exercising only the easier path.**
+
+**Time Lost:** ~30 min then; ~70 min more on 2026-07-23 to finish it.
 
 **Severity:** High — a core feature that had never worked, presented as working.
 
@@ -917,6 +1013,27 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Solution Gaps
 
+### 2026-07-23 — Seeded jobs are promised ~8 minutes out, so any accelerated run reads as late
+
+**Current State:** The seed places the first upcoming jobs at `Epoch + 8 / 25 / 55` minutes so a countdown is already ticking when the app opens (deliberate — see the demo-clock work). The customer's en-route countdown is reconciled against the *promised* arrival, so it turns red and reads "Late by …" once demo-now passes the promise.
+
+**Limitation:** Those two facts fight each other the moment the operator accelerates. At 30× the clock crosses an 8-minute promise in ~16 real seconds, so a job that is progressing perfectly normally — provider driving, ETA falling — shows a red, behind-promise countdown for the rest of the run. The signal is *honest* (the provider genuinely will arrive later than promised) but it misreads on stage as something being broken.
+
+**Ideal Solution:** Either stage the demo job further out than the rate will chew through, or have the operator accept the reschedule (which retargets the promise and clears the red), or make the en-route countdown target the live ETA and show behind-promise as a separate, quieter mark rather than recolouring the headline.
+
+**Closing this gap requires:**
+1. Decide the intended reading — is red-while-driving informative or alarming? (a conversation, not code) — pending
+2. If staging: give the demo-tracked job a promise proportional to the intended rate (~an hour) — half an hour
+3. If UI: split "time to arrival" from "behind promise" in `Countdown`, so the headline counts down and lateness is a subordinate badge — half a day, and it touches both apps' status cards
+
+**Active mitigation:** run the pitch at 1× through the arrival beat, or answer the running-late proposal, which retargets the promise and returns the countdown to calm.
+
+**Priority:** Medium — nothing is wrong, but the most-watched number on the demo's hero screen can read alarming during a normal run.
+
+**Related:** [Mistake: departing flipped the status but never drove the provider](#2026-07-23--departing-flipped-the-status-but-never-drove-the-provider) — until that was fixed the ETA never fell at all, which made this look like the same bug.
+
+---
+
 ### 2026-07-22 — The provider reaches Payout only by tapping Complete itself
 
 **Current State:** The customer auto-advances to Payment on the `HubJobUpdated` "Completed" event while parked on Tracking. The provider's equivalent nav to Payout lives in the `JobActioned` (own-action) branch, not `HubJobUpdated`.
@@ -951,16 +1068,16 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 **Limitation:** Depart, chat across two devices (typing indicator and seen receipts crossing), arrive, start work, complete, **payment**, and **rating** have never been exercised on two real apps. Payment is the significant one — the customer's total beside the provider's payout is the marketplace story and the screen an investor studies.
 
-**Ideal Solution:** Finish the remaining beats, screenshotting each.
+**Updated 2026-07-23 — the walkthrough was run end to end; one item remains.** A real booking (customer → Mike's Plumbing) appeared live on the provider, was accepted, ran the full running-late propose/accept/retarget loop across both devices, then depart → arrive → work → complete, landing the provider on **Payout $235.88** and the customer on **Paid $313.58** (subtotal $277.50, +13% HST vs −15% platform fee — the two figures differing is the marketplace proof), both rated, job `Closed`, and the provider's public average moved 3.7 (3) → 4.0 (4) without the provider→customer rating polluting it. The run found three defects, all since fixed: [no drive on depart](#2026-07-23--departing-flipped-the-status-but-never-drove-the-provider), [the map never tracking](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch), and [notices covering titles](#2026-07-23--notices-expired-on-the-demo-clock-so-at-1x-they-never-cleared) — which is the fourth consecutive time the walkthrough earned its cost.
 
 **Closing this gap requires:**
-1. Boot both simulators, install current builds (~10 min including a provider rebuild) — pending
-2. Drive depart → arrive → work → complete, watching the map and both countdowns — pending
-3. Chat across devices, checking typing/seen cross the wire — pending
-4. Payment on both phones side by side — pending
-5. Rating both ways, job closes — pending
+1. Boot both simulators, install current builds — ✅ shipped
+2. Drive depart → arrive → work → complete, watching the map and both countdowns — ✅ shipped
+3. Chat across devices, checking typing/seen cross the wire — **pending** (both Chat screens were opened and render correctly, but a message, typing indicator and seen receipt have still never been watched crossing between two live devices)
+4. Payment on both phones side by side — ✅ shipped
+5. Rating both ways, job closes — ✅ shipped
 
-**Priority:** High — it is the plan's stated acceptance mechanism, and every prior beat found defects.
+**Priority:** Medium — down from High. The money and reschedule beats are verified; only the chat-crossing signal remains unproven, and it is the one beat whose failure would be least visible on stage.
 
 **Related:** [Lesson: rendering defects are structurally invisible to a green test suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
 
