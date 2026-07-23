@@ -16,6 +16,45 @@
 
 ## Lessons
 
+### 2026-07-23 — The live two-app run is this project's highest-yield test, and it has never come back empty
+
+**Insight:** Driving both apps through the real user flow on two simulators — not the `/dev` scripted timeline — has found a user-visible, demo-affecting defect **every single time it has been run**, and none of those defects was visible to the 213-test suite, which was green throughout. The technique is now promoted to a first-class lesson because it has caught bugs in at least six separate Mistakes below.
+
+**Discovery:** Recognised across the run of this project, and made unambiguous by the 2026-07-23 full dual simulation: a clean, all-green run of every automated test, immediately followed by a live walkthrough that surfaced the provider no-show sign-bug in its first few minutes.
+
+**Design intent:** The reason the suite keeps missing these is structural, not sloppy. No test project compiles `Views/*.fs` or `MauiProgram.fs`; MVU helpers that keep only the model half of `update` cannot see `Cmd`-only logic; and the two apps only truly interact over a live SignalR hub that unit tests stub out. The live run is the only place all three of those blind spots are exercised at once.
+
+**Bug categorisation — what would have caught each cheapest:**
+
+| Defect | Cheapest catcher | Needed the live two-app run? |
+|---|---|---|
+| [No drive on Depart](#2026-07-23--departing-flipped-the-status-but-never-drove-the-provider) | live run (real vs scripted path) | **Yes** |
+| [Map never tracked (credentials + casing)](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch) | live run (WebView + hub) | **Yes** |
+| [Restored session opened no hub](#2026-07-22--a-restored-session-connected-to-no-live-hub) | live run (restore path) | **Yes** |
+| [Restored provider shown Offline](#2026-07-23--a-restored-provider-session-was-shown-offline-with-no-jobs) | live run (restore path) | **Yes** |
+| [No-show countdown sign bug](#2026-07-23--the-providers-no-show-countdown-told-them-to-keep-waiting-after-the-deadline-had-passed) | **unit test** (once you know the case) | No — but only the live run *revealed the case* |
+| [Notices expired on demo clock](#2026-07-23--notices-expired-on-the-demo-clock-so-at-1x-they-never-cleared) | live run (real-time vs demo-time) | **Yes** |
+
+The last row is the important nuance, not a footnote: the no-show bug was *fixable* with a cheap unit test, but no one would ever have written that test, because the failing case (demo-now past the grace deadline) is one you only think to check after you have watched the wrong number on a screen. The live run's value is not that it is the only possible catcher — it is that it is the only thing that **tells you which cheap test to write.**
+
+**Active mitigation:** None automatable — this is inherently a human-in-the-loop check. The durable rule: run the full two-app flow before every demo and after any change to hub, restore, clock, or view code, and treat "the suite is green" as necessary but never sufficient. The `compile-gate` CI job closes the narrower "does the view compile" blind spot; nothing closes the "do the two apps actually interact correctly" one except running them.
+
+**Related:** [Rendering defects are structurally invisible to a green suite](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); [demo-path divergence](#2026-07-23--the-scripted-demo-did-work-the-product-itself-did-not-demo-path-divergence); [restore-path divergence](#2026-07-23--the-restore-path-keeps-forgetting-what-the-login-path-does-restore-path-divergence)
+
+---
+
+### 2026-07-23 — The iOS Simulator tap space is points, not screenshot pixels (~2× off)
+
+**Insight:** The `control` tap action takes **device points** (≈440 wide on the 17 Pro Max, ≈402 on the 17 Pro), while the screenshots it returns are native-resolution pixels (≈920+ wide). Reading a control's position off the returned image and passing those numbers straight to `tap` lands at roughly **twice** the intended x/y — which during the dual run tapped "Cancel Job" instead of "Chat" and triggered the cancel-confirm bar on a live job.
+
+**Discovery:** A tap meant for the second item in a bottom row (Chat) hit the third (Cancel Job); the correction was to divide the pixel position by the image-to-point ratio (~2.09 on the Max) before tapping.
+
+**Impact:** Reusable for anyone driving these simulators: convert screenshot-pixel coordinates to points (`point = pixel × deviceWidthPt / imageWidthPx`) before tapping, or anchor off elements whose centre is near screen-centre (~220 on the Max) where the error is smallest and least likely to mis-hit. The cost of getting it wrong is not just a missed tap — a mis-hit can fire a *destructive* control (here, Cancel Job), so verify the resulting screen before proceeding. The inline cancel-confirm ("Keep it") is what made that particular slip harmless.
+
+**Related:** [The live two-app run…](#2026-07-23--the-live-two-app-run-is-this-projects-highest-yield-test-and-it-has-never-come-back-empty)
+
+---
+
 ### 2026-07-23 — Half of an invariant was designed and commented; the other half was arithmetic ("half-specified invariant")
 
 **Insight:** The whole product is two phones showing two sides of **one** job, and the seed gave the two prefilled demo accounts no live job in common. The reason is the interesting part: the pairing has two halves, and only one was ever specified. `mkJob` chose the customer from an explicit index — deliberate, with a comment saying "the soonest belongs to John Reyes — the demo login" — and chose the *provider* from `(i * 3) % provs.Length`, an expression written to spread work across a roster. Half the invariant was designed; the other half was whatever the arithmetic produced, and it produced GearHeads Mobile.
@@ -541,7 +580,7 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 **Symptom:** During the full two-app simulation, the provider's active-job screen read *"Late — reportable as a no-show in 11:48"* while the grace deadline was already **11:48 in the past** — i.e. the customer could report the no-show *right then*, but the screen implied ~12 minutes still had to elapse.
 
-**Attempted:** Nearly dismissed as a demo-clock artifact (the countdown appeared to jump from 1:46 to 11:48 across a pause/resume). Resolved by computing from the live API instead of cross-screenshot memory: `noShowDeadline = PromisedStart + 15 min` = 00:23; demoNow at the screenshot ≈ 00:34:48; so the threshold was 11:48 *past*, not future. Caught by *running the real flow* — the same technique as the map-tracking and restore-hub finds.
+**Attempted:** Nearly dismissed as a demo-clock artifact (the countdown appeared to jump from 1:46 to 11:48 across a pause/resume). Resolved by computing from the live API instead of cross-screenshot memory: `noShowDeadline = PromisedStart + 15 min` = 00:23; demoNow at the screenshot ≈ 00:34:48; so the threshold was 11:48 *past*, not future. Caught by *running the real flow* — see [Lesson: the live two-app run is this project's highest-yield test](#2026-07-23--the-live-two-app-run-is-this-projects-highest-yield-test-and-it-has-never-come-back-empty). The discipline that resolved it: verify a suspected clock/environment artifact against source or the live API before writing it off, not against memory of earlier screenshots.
 
 **Root Cause:** `Countdown.forProvider`, `Scheduled` past-promised branch, used one sign-blind value: `Format.countdown ((noShowDeadline - demoNow).Duration())`. `.Duration()` takes the absolute value, so a negative (past) span renders as a positive "in X", and the label never flipped. The **customer** side already handles this exact deadline (it switches to "your provider never arrived — overdue by"); the provider side never got the split, so the two sides disagreed about the same instant.
 
