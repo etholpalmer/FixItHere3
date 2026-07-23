@@ -1,8 +1,10 @@
 <svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <!-- FixItHere mark: a red map pin (the Google-Maps convention for a location)
-       with the honey brand colour (#9C6516) kept as the inner circle and a white
-       wrench — services, not just a location. -->
+       with a deep-navy inner circle and a white wrench — services, not just a
+       location. The circle sits between the red pin and the white tool, so it has
+       to hold against both: navy is a clear hue and value break from the red, and
+       carries white at ~11:1. -->
   <path fill="#EA4335" d="M256 40c-92.8 0-168 75.2-168 168 0 46 27.4 96.6 61.9 140.8 34.2 43.8 74.2 79.6 96.3 98.3a15 15 0 0 0 19.6 0c22.1-18.7 62.1-54.5 96.3-98.3C392.6 304.6 420 254 420 208c0-92.8-75.2-168-164-168z"/>
-  <circle cx="256" cy="200" r="72" fill="#9C6516"/>
+  <circle cx="256" cy="200" r="72" fill="#1D3557"/>
   <path fill="#FFFFFF" d="M289 170a34 34 0 0 1-42 42l-33 33a12 12 0 0 1-17 0l-3-3a12 12 0 0 1 0-17l33-33a34 34 0 0 1 42-42l-19 19a8 8 0 0 0 0 11l9 9a8 8 0 0 0 11 0z"/>
 </svg>
