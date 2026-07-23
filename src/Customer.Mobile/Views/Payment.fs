@@ -95,7 +95,7 @@ let private primaryButton (text: string) (msg: Msg) =
 let view (model: Model) (jobId: int) =
     ScrollView(
      (VStack(spacing = Theme.Space.lg) {
-        header "Receipt"
+        header "Payment"
 
         match model.PaymentResult with
         | None ->

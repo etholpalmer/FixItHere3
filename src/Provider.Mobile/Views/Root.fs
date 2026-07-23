@@ -2,6 +2,7 @@ module FixItHere.Provider.Views.Root
 
 open Fabulous.Maui
 open type Fabulous.Maui.View
+open FixItHere.ClientShared
 open FixItHere.Provider
 open FixItHere.Shared
 
@@ -33,14 +34,23 @@ let view (model: Model) =
                 // The stack, newest first. A single slot silently replaced
                 // whatever was there — so the two-sided beats this phase exists
                 // to show could overwrite each other mid-demo.
-                (VStack(spacing = 4.) {
+                // Floating toast cards, not a full-bleed bar: inset from the
+                // edges with a top margin that clears the status bar, and
+                // rounded, so a notice reads as a notification laid over the
+                // screen rather than as something that has replaced its header.
+                (VStack(spacing = Theme.gapTight) {
                     for n in model.Notices do
-                        Label(n.Text)
+                        Border(
+                            Label(n.Text)
+                                .textColor(Microsoft.Maui.Graphics.Colors.White)
+                                .padding(Theme.gap))
                             .background(noticeColor n.Kind)
-                            .textColor(Microsoft.Maui.Graphics.Colors.White)
-                            .padding(12.)
+                            .stroke(noticeColor n.Kind)
+                            .strokeShape(RoundRectangle(cornerRadius = Theme.radiusControl))
                             .gestureRecognizers() { TapGestureRecognizer(DismissNotice n.Id) }
-                }).verticalOptions(Microsoft.Maui.Controls.LayoutOptions.Start)
+                })
+                    .verticalOptions(Microsoft.Maui.Controls.LayoutOptions.Start)
+                    .margin(Microsoft.Maui.Thickness(Theme.gap, Theme.Space.xxl, Theme.gap, 0.))
                 match model.Error with
                 | Some e ->
                     Label(sprintf "⚠ %s" e)
