@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-23 (all 19 plan tasks complete; post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair that shared no job, cold Cmd helpers, and the SQLite advisory. CI re-enabled and green with a working macOS view-code compile gate; six stale gaps archived)
+- **Last Updated:** 2026-07-23 (all 19 plan tasks complete. Post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair, cold Cmd helpers, the SQLite advisory, and the provider no-show countdown. CI green with a macOS view-code gate, required on main. Full two-app simulation run end to end — chat crossing + seen receipts verified live)
 
 ---
 
@@ -536,6 +536,26 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 ---
 
 ## Mistakes & Fixes
+
+### 2026-07-23 — The provider's no-show countdown told them to keep waiting after the deadline had passed
+
+**Symptom:** During the full two-app simulation, the provider's active-job screen read *"Late — reportable as a no-show in 11:48"* while the grace deadline was already **11:48 in the past** — i.e. the customer could report the no-show *right then*, but the screen implied ~12 minutes still had to elapse.
+
+**Attempted:** Nearly dismissed as a demo-clock artifact (the countdown appeared to jump from 1:46 to 11:48 across a pause/resume). Resolved by computing from the live API instead of cross-screenshot memory: `noShowDeadline = PromisedStart + 15 min` = 00:23; demoNow at the screenshot ≈ 00:34:48; so the threshold was 11:48 *past*, not future. Caught by *running the real flow* — the same technique as the map-tracking and restore-hub finds.
+
+**Root Cause:** `Countdown.forProvider`, `Scheduled` past-promised branch, used one sign-blind value: `Format.countdown ((noShowDeadline - demoNow).Duration())`. `.Duration()` takes the absolute value, so a negative (past) span renders as a positive "in X", and the label never flipped. The **customer** side already handles this exact deadline (it switches to "your provider never arrived — overdue by"); the provider side never got the split, so the two sides disagreed about the same instant.
+
+**Fix:** Split the branch at the deadline in [Countdown.fs](src/Shared/Countdown.fs) — count down to it before, count up as "the customer can report you; overdue by" after. `3f2c90c`. Mutation-checked: restoring the `.Duration()` form turns the new test red.
+
+**Prevention:** This is a fourth instance of the sign-blind-label composition defect — a `Countdown` value that is correct in magnitude paired with a label that doesn't carry the sign. The class is named in [composition defects](#2026-07-22--composition-defects-two-correct-halves-one-wrong-whole) and [guard with a second face](#2026-07-23--a-clamp-that-protects-one-half-of-its-domain-breaks-the-other-guard-with-a-second-face); the active hunt is: any countdown using `.Duration()` or an absolute value must prove its label flips at zero, and both role-facing sides of the same deadline must be checked together.
+
+**Time Lost:** ~20 min, most of it ruling out a clock artifact before finding the real sign bug.
+
+**Severity:** Medium — not data loss, but on the demo's active-job screen it tells the provider the opposite of the truth about their own no-show exposure, and it contradicts the customer's screen at the same instant.
+
+**Related:** [Lesson: guard with a second face](#2026-07-23--a-clamp-that-protects-one-half-of-its-domain-breaks-the-other-guard-with-a-second-face); [Lesson: composition defects](#2026-07-22--composition-defects-two-correct-halves-one-wrong-whole); [Gap: Typing/Seen hub relay](#2026-07-18--typingseen-hub-relay-has-no-automated-test-verified-manually-only)
+
+---
 
 ### 2026-07-23 — The two demo logins shared no live job
 
@@ -1392,7 +1412,9 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 1. Stand up an in-process SignalR test harness (two `HubConnection`s against the `WebApplicationFactory`'s `TestServer`) — roughly half a day given no existing precedent in this repo for hub-level testing — pending
 2. Write the actual relay-assertion tests for `Typing` and `Seen` — an hour once the harness exists — pending
 
-**Updated 2026-07-23 — this now carries the one item the two-app walkthrough never reached.** Chat *crossing* two devices has not only gone untested automatically, it has never been **watched live** either: every other beat of the demo has been driven on two simulators and screenshotted, but the typing indicator and seen receipts appearing on the opposite phone have not. So the relay currently has neither of its two possible forms of evidence. Watching it once on two simulators is ~15 minutes and worth doing before the harness work, because it is the cheaper of the two and answers "does it work at all" rather than "will it keep working".
+**Updated 2026-07-23 (first) — this now carries the one item the two-app walkthrough never reached.** Chat *crossing* two devices had never been watched live: every other beat had been driven on two simulators and screenshotted, but the typing indicator and seen receipts appearing on the opposite phone had not.
+
+**Updated 2026-07-23 (second) — the persistent half is now watched live; only the transient bubble remains.** A full dual simulation drove a real conversation on job 51 across both phones: a provider message appeared on the customer's screen live (correct sender name "Mike's Plumbing", timestamp, left-aligned), a customer reply appeared on the provider's screen live, and the **seen receipt crossed in both directions** ("6:31 PM · Seen"). So the SignalR relay itself is now confirmed live and bidirectional — `MessageReceived` and `SendSeen` share the same `DemoHub` as `SendTyping`. The **typing indicator** specifically was still not captured: it is a ~3s transient and the type-then-screenshot round-trip is slower than its lifetime — the same [screenshot-vs-transient limit](#2026-07-23--a-fix-that-makes-something-transient-can-outrun-the-tool-that-verifies-it) that the error-bar fix hit. It is very likely working (same hub, and Seen crossed), but "seen working" for the typing bubble specifically remains open, and the automated hub test below is the real close-out for it.
 
 **Priority:** Low for the prototype's current scope (explicitly accepted in the plan's self-review), but the first thing to add if this project graduates past demo status. The **live watch** above is a separate, higher priority — it is the last unverified beat in the demo.
 
