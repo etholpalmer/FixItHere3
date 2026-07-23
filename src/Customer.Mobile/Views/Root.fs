@@ -53,8 +53,8 @@ let view (model: Model) =
                             .strokeShape(RoundRectangle(cornerRadius = Theme.radiusControl))
                             .gestureRecognizers() { TapGestureRecognizer(DismissNotice n.Id) }
                 })
-                    .verticalOptions(Microsoft.Maui.Controls.LayoutOptions.Start)
-                    .margin(Microsoft.Maui.Thickness(Theme.gap, Theme.Space.xxl, Theme.gap, 0.))
+                    .verticalOptions(Microsoft.Maui.Controls.LayoutOptions.End)
+                    .margin(Microsoft.Maui.Thickness(Theme.gap, 0., Theme.gap, Theme.Space.xxl))
                 match model.Error with
                 | Some e ->
                     Label(sprintf "⚠ %s" e)

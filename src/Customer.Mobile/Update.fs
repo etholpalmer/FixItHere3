@@ -29,10 +29,16 @@ let tickMs = 250
 
 /// Queue a notice. Kind and job scope come from the caller because only the
 /// caller knows what the message is about.
-let private notify kind jobId text (m: Model) =
-    { m with
-        Notices = Notify.push (Notify.create m.NextNoticeId kind jobId m.DemoNow text) m.Notices
-        NextNoticeId = m.NextNoticeId + 1 }
+let private notify kind jobId text (m: Model) : Model * Cmd<Msg> =
+    let id = m.NextNoticeId
+    let m =
+        { m with
+            Notices = Notify.push (Notify.create id kind jobId m.DemoNow text) m.Notices
+            NextNoticeId = id + 1 }
+    // Non-Ask notices clear themselves after ~7s of *real* time — independent of
+    // the demo clock's rate — so they never pile up or sit over the screen. Ask
+    // waits for its answer and is dismissed when the answer is given.
+    m, (match kind with NoticeKind.Ask -> Cmd.none | _ -> delayCmd 7000 (DismissNotice id))
 
 
 /// Turn the wire DTO into the affine map. A malformed clock leaves the app on
@@ -171,8 +177,8 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         let said =
             if accept then "New arrival time accepted"
             else "Declined — the original time still stands"
-        notify (if accept then NoticeKind.Success else NoticeKind.Warning) (Some jobId) said model,
-        apiCmd (fun () -> deps.DecideReschedule req) HubJobUpdated
+        let m2, ncmd = notify (if accept then NoticeKind.Success else NoticeKind.Warning) (Some jobId) said model
+        m2, Cmd.batch [ ncmd; apiCmd (fun () -> deps.DecideReschedule req) HubJobUpdated ]
     | ReportNoShow jobId ->
         let req : ReportNoShowRequest =
             { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Customer }
@@ -244,13 +250,13 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             match model.Session with
             | Some s -> apiCmd (fun () -> deps.GetJobs s.UserId) JobsLoaded
             | None -> Cmd.none
-        let thanked = notify NoticeKind.Success None "Thanks for your rating!" model
+        let thanked, ncmd = notify NoticeKind.Success None "Thanks for your rating!" model
         Nav.resetTo Home
             { thanked with
                 PaymentResult = None
                 RatingStars = 5
                 RatingComment = "" },
-        refresh
+        Cmd.batch [ ncmd; refresh ]
     | StartFakeCall -> { model with FakeCallActive = true }, delayCmd 10000 EndFakeCall
     | EndFakeCall -> { model with FakeCallActive = false }, Cmd.none
     | SetLocation (lat, lng) -> { model with MyLocation = (lat, lng) }, Cmd.none
@@ -305,7 +311,7 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | HubNotification text ->
         // Classified rather than dumped into one grey bar: a no-show and an
         // acceptance should not look identical.
-        notify (Notify.classify text) None text model, Cmd.none
+        notify (Notify.classify text) None text model
     | HubTyping (jobId, senderId, senderRole) ->
         match model.Screen, model.Session with
         | Chat id, Some s when id = jobId && not (isSelf s senderId senderRole) ->
