@@ -106,7 +106,16 @@ function step() {
 }
 if (!reduce) step();
 
-const conn = new signalR.HubConnectionBuilder().withUrl(baseUrl + "/hub").withAutomaticReconnect().build();
+/* withCredentials:false is load-bearing, not a nicety. This page is loaded as an
+   HTML string, so its origin is null and every hub request is cross-origin. The
+   server's CORS is AllowAnyOrigin (no credentials) — which the browser refuses to
+   pair with a credentialed request. SignalR's client defaults withCredentials to
+   true, so its negotiate was silently blocked and the socket never opened, while
+   the plain `fetch` below (no credentials by default) succeeded — which is why the
+   car was placed once and then never tracked. */
+const conn = new signalR.HubConnectionBuilder()
+    .withUrl(baseUrl + "/hub", { withCredentials: false })
+    .withAutomaticReconnect().build();
 function place(lat, lng) {
   if (!carPlaced) {
     car.setLatLng([lat, lng]).addTo(map);
@@ -117,9 +126,17 @@ function place(lat, lng) {
   frame();
 }
 
+/* Read both casings. SignalR's JSON hub protocol serialises the DTO PascalCase
+   (ProviderId/Lat/Lng, matching the F# record the typed clients decode), while
+   the REST /location fetch above is camelCase. Reading only camelCase here meant
+   every live push failed the id guard and was silently dropped — the fetch
+   placed the car once and it never moved again, so the map never tracked the
+   drive or closed in. */
 conn.on("LocationUpdated", l => {
-  if (l.providerId !== providerId) return;
-  place(l.lat, l.lng);
+  const pid = l.providerId ?? l.ProviderId;
+  const lat = l.lat ?? l.Lat, lng = l.lng ?? l.Lng;
+  if (pid !== providerId) return;
+  place(lat, lng);
 });
 conn.start();
 
