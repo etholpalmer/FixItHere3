@@ -120,33 +120,49 @@ let private deps =
     Api.createDepsWith pickPhoto gpsLocation hub.SendTyping hub.SendSeen SessionStore.save SessionStore.restore (new System.Net.Http.HttpClientHandler()) Config.baseUrl
 
 let mutable private hubStarted = false
+/// Guards the async connect window. `hubStarted` only latches once StartAsync
+/// returns; without a second synchronous flag, every message arriving during
+/// that window (JobsLoaded and ClockSynced both fire right after a restore)
+/// would see `not hubStarted` and start the hub again.
+let mutable private hubStarting = false
 
-/// Wraps Update.update: first successful login also starts the SignalR hub (the same
-/// HubClient instance whose SendTyping/SendSeen already feed `deps` above).
+let private startHubCmd (role: string) (userId: int) =
+    Cmd.ofSub (fun dispatch ->
+        task {
+            try
+                do! hub.Start(
+                        role, userId,
+                        (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
+                        (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
+                        (fun (j, s, r) -> dispatch (HubTyping (j, s, r))),
+                        (fun (j, s, r) -> dispatch (HubSeen (j, s, r))),
+                        (HubProviderUpdated >> dispatch),
+                        (ClockSynced >> dispatch))
+                // Only latch once connected: WithAutomaticReconnect does not cover
+                // the initial StartAsync, so latching before it succeeds would leave
+                // the app permanently HTTP-only with no retry and no visible error.
+                hubStarted <- true
+            with ex ->
+                // Clear the in-flight guard so the next session-bearing update retries.
+                hubStarting <- false
+                dispatch (ApiError (sprintf "Realtime unavailable: %s" ex.Message))
+        } |> ignore)
+
+/// Wraps Update.update: the first time the app holds a session it starts the
+/// SignalR hub (the same HubClient whose SendTyping/SendSeen already feed `deps`).
+///
+/// Keyed on the *model's session*, not on the `LoggedIn` message: a returning
+/// user is auto-restored to Home via `SplashDone` (task 0b), which never emits
+/// `LoggedIn`. Matching the message left every restored session permanently
+/// HTTP-only — no live status, chat, reschedule or arrival — which is exactly
+/// the two-sided beat the demo turns on. Role/userId come from the session, so
+/// login and restore share one path.
 let private updateWithHub (msg: Msg) (model: Model) =
     let m, cmd = Update.update deps msg model
-    match msg with
-    | LoggedIn resp when not hubStarted ->
-        let hubCmd =
-            Cmd.ofSub (fun dispatch ->
-                task {
-                    try
-                        do! hub.Start(
-                                resp.Role, resp.UserId,
-                                (HubJobUpdated >> dispatch), (HubMessageReceived >> dispatch),
-                                (HubLocationUpdated >> dispatch), (HubNotification >> dispatch),
-                                (fun (j, s, r) -> dispatch (HubTyping (j, s, r))),
-                                (fun (j, s, r) -> dispatch (HubSeen (j, s, r))),
-                                (HubProviderUpdated >> dispatch),
-                                (ClockSynced >> dispatch))
-                        // Only latch once connected: WithAutomaticReconnect does not cover
-                        // the initial StartAsync, so latching before it succeeds would leave
-                        // the app permanently HTTP-only with no retry and no visible error.
-                        hubStarted <- true
-                    with ex ->
-                        dispatch (ApiError (sprintf "Realtime unavailable: %s" ex.Message))
-                } |> ignore)
-        m, Cmd.batch [ cmd; hubCmd ]
+    match m.Session with
+    | Some s when not hubStarted && not hubStarting ->
+        hubStarting <- true
+        m, Cmd.batch [ cmd; startHubCmd s.Role s.UserId ]
     | _ -> m, cmd
 
 let program = Program.statefulWithCmd Update.init updateWithHub Views.Root.view
