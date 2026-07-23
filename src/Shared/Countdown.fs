@@ -134,9 +134,23 @@ module Countdown =
             elif demoNow < r.PromisedStart then
                 Some { at "Leave now — due in" "Due" r.PromisedStart demoNow with Urgency = Urgency.Urgent }
             else
-                Some { Label = "Late — reportable as a no-show in"
-                       Value = Format.countdown ((Reschedule.noShowDeadline r - demoNow).Duration())
-                       Urgency = Urgency.Overdue }
+                // Two faces, split by the deadline. `.Duration()` on a single
+                // sign-blind value read "reportable as a no-show in 11:48" once
+                // the threshold was already 11:48 *past* — telling the provider
+                // to wait when the customer can report them right now. This is
+                // the same sign-blind-label bug the customer side ("Arriving in
+                // 3:06 late") was fixed for; the provider Scheduled branch kept
+                // it. The customer's own screen already flips to "never arrived"
+                // at this deadline, so the two sides must agree here.
+                let noShow = Reschedule.noShowDeadline r
+                if demoNow < noShow then
+                    Some { Label = "Late — reportable as a no-show in"
+                           Value = Format.countdown (noShow - demoNow)
+                           Urgency = Urgency.Overdue }
+                else
+                    Some { Label = "No-show — the customer can report you; overdue by"
+                           Value = Format.countdown (demoNow - noShow)
+                           Urgency = Urgency.Overdue }
         | EnRoute -> Some (at "Due in" "Overdue by" r.PromisedStart demoNow)
         | Arrived | InProgress | Completed | Closed | Cancelled | ProviderNoShow -> None
 

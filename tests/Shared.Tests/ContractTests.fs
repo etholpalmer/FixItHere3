@@ -462,6 +462,22 @@ let ``past the promise the provider is told when it becomes reportable`` () =
     Assert.Equal(Format.countdown (Reschedule.noShowDeadline r - after), prov.Value)
 
 [<Fact>]
+let ``once past the grace deadline the provider is not told to keep waiting`` () =
+    // Caught in the live two-app run: a single sign-blind `.Duration()` value
+    // read "reportable as a no-show in 11:48" when the deadline was already
+    // 11:48 *past* — telling the provider to wait while the customer could
+    // report them right then. The label must flip, like the customer's does.
+    let r = booking 30.0                       // promised = epoch + 30
+    let deadline = Reschedule.noShowDeadline r // = promised + 15 = epoch + 45
+    let wellPast = deadline.AddMinutes 12.0     // 12 minutes past reportable
+    let prov = mustHave (Countdown.forProvider Scheduled r (Some 8.0) wellPast)
+    // No longer the "in X" phrasing that implies time remaining…
+    Assert.DoesNotContain("reportable as a no-show in", prov.Label)
+    // …and the value is how long it has been overdue, counted forward.
+    Assert.Equal(Format.countdown (wellPast - deadline), prov.Value)
+    Assert.Equal(Urgency.Overdue, prov.Urgency)
+
+[<Fact>]
 let ``a live ETA that cannot make the promise is shown as overdue`` () =
     // The reconciliation the plan asked for: a provider already behind does
     // not become on time by driving fast, and the screen must not show a
