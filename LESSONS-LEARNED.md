@@ -68,7 +68,7 @@
 
 **Impact:** Two consequences, and the first is the uncomfortable one. (1) A test that drains a `Cmd` may be passing because *construction* fired the effect rather than because dispatch did — so "I drained the Cmd" is weaker evidence than it looks, and a mutation that only removes the Cmd from the returned batch cannot distinguish the two. Mutate the construction, not the return. (2) In product code, building a Cmd speculatively and choosing not to return it is a live API call.
 
-**Resolution (2026-07-23):** `2f0ac1a` made `apiCmd` and `delayCmd` cold in both apps — the task is now built inside `Cmd.ofSub`, so nothing runs until dispatch — and added `apiCmd is cold` / `delayCmd is cold` to both suites, mutation-checked (restoring `Cmd.ofTaskMsg` turns the customer test red). The audit that ran first found **no** Cmd constructed and dropped anywhere, so consequence (2) never became a live defect. The *reasoning here stays permanently active*: F#'s `task { }` is hot, `Cmd.ofTaskMsg` takes an already-started task, and the rule "mutate the construction, not the presence in the returned batch" applies to every Cmd helper anyone writes next. Only the specific hot `apiCmd` retired.
+**Resolution (2026-07-23):** `bb4a5d8` made `apiCmd` and `delayCmd` cold in both apps — the task is now built inside `Cmd.ofSub`, so nothing runs until dispatch — and added `apiCmd is cold` / `delayCmd is cold` to both suites, mutation-checked (restoring `Cmd.ofTaskMsg` turns the customer test red). The audit that ran first found **no** Cmd constructed and dropped anywhere, so consequence (2) never became a live defect. The *reasoning here stays permanently active*: F#'s `task { }` is hot, `Cmd.ofTaskMsg` takes an already-started task, and the rule "mutate the construction, not the presence in the returned batch" applies to every Cmd helper anyone writes next. Only the specific hot `apiCmd` retired.
 
 **Active mitigation:** `apiCmd is cold: no call until the Cmd is dispatched` and `delayCmd is cold: the clock starts on dispatch`, in both `tests/Customer.Mobile.Tests/UpdateTests.fs` and `tests/Provider.Mobile.Tests/UpdateTests.fs`. Without them the helper reverts silently the first time it is rewritten.
 
@@ -1694,7 +1694,7 @@ The `runWith` typing/seen tests are **not** affected, and that distinction matte
 
 **Related:** [Lesson: a task-based Cmd can fire before it is dispatched](#2026-07-23--a-task-based-cmd-can-fire-before-it-is-dispatched); [MVU test helpers that discard the returned `Cmd<Msg>`…](#2026-07-18--mvu-test-helpers-that-discard-the-returned-cmdmsg-silently-hide-untested-guard-logic)
 
-**Archived 2026-07-23** — closed by `2f0ac1a`. All four items shipped: the audit found no Cmd constructed and dropped (so there was never a live defect), `apiCmd` and `delayCmd` are cold in both apps, both mobile suites were re-run with nothing newly red, and the coldness tests that keep it that way are in place.
+**Archived 2026-07-23** — closed by `bb4a5d8`. All four items shipped: the audit found no Cmd constructed and dropped (so there was never a live defect), `apiCmd` and `delayCmd` are cold in both apps, both mobile suites were re-run with nothing newly red, and the coldness tests that keep it that way are in place.
 
 ---
 
