@@ -73,11 +73,18 @@ let private statusCard (model: Model) (job: FixItHere.Shared.Dtos.JobDto) (etaLi
             // The countdown is the headline, not a footnote: it is the
             // number the customer is actually here for — large-title scale,
             // so it reads in under a second, one-handed, from across a room.
-            // One Label rather than a nested HStack — Fabulous CE rejects
+            // The caption is a separate, smaller Label: at large-title scale
+            // "Your provider never arrived — overdue by 04:12" is far wider
+            // than a phone and the words, not the clock, are what get cut.
+            // Two Labels rather than a nested HStack — Fabulous CE rejects
             // nesting here.
             match countdownFor model job with
             | Some c ->
-                Label(sprintf "%s %s" c.Label c.Value)
+                Label(c.Label)
+                    .font(size = Theme.Font.subhead, attributes = FontAttributes.Bold)
+                    .textColor(urgencyColor c.Urgency)
+                    .lineBreakMode(Microsoft.Maui.LineBreakMode.WordWrap)
+                Label(c.Value)
                     .font(size = Theme.Font.largeTitle, attributes = FontAttributes.Bold)
                     .textColor(urgencyColor c.Urgency)
             | None -> ()

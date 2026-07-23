@@ -61,6 +61,10 @@ let private jobRow (nav: Msg) (title: string) (subtitle: string) (subtitleColor:
             Label(subtitle)
                 .font(size = Theme.Font.subhead)
                 .textColor(subtitleColor)
+                // Status and countdown caption together run long — "Work in
+                // progress · Your provider never arrived — overdue by 4:12"
+                // has to wrap rather than lose its tail.
+                .lineBreakMode(Microsoft.Maui.LineBreakMode.WordWrap)
                 .gridColumn(0).gridRow(1)
             Label("›")
                 .font(size = Theme.Font.title2)

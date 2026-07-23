@@ -66,6 +66,9 @@ let private jobCard (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
                 Label(Countdown.oneLine c)
                     .font(size = Theme.Font.footnote, attributes = FontAttributes.Bold)
                     .textColor(urgencyColor c.Urgency)
+                    // "Late — reportable as a no-show in 43:46" needs two
+                    // lines on a phone; one line silently loses the clock.
+                    .lineBreakMode(Microsoft.Maui.LineBreakMode.WordWrap)
             | None -> ()
         })
         .stroke(Theme.surfaceEdge)

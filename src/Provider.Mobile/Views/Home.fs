@@ -63,7 +63,7 @@ let private stateLine (j: FixItHere.Shared.Dtos.JobDto) =
 /// the outer VStack.
 let private activeJobCard (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
     Border(
-        Grid(coldefs = [ Star; Auto ], rowdefs = [ Auto; Auto; Auto ]) {
+        Grid(coldefs = [ Star; Auto ], rowdefs = [ Auto; Auto; Auto; Auto ]) {
             Label("ACTIVE JOB")
                 .font(size = Theme.Font.caption, attributes = FontAttributes.Bold)
                 .textColor(Theme.brandInk)
@@ -76,18 +76,26 @@ let private activeJobCard (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
                 .font(size = Theme.Font.subhead)
                 .textColor(Theme.brandInk)
                 .gridColumn(0).gridRow(2)
+            // Split for the same reason as `availableJobRow` below: the label
+            // is prose and must wrap, the clock is not and must not.
             match countdownFor model j with
             | Some c ->
-                Label(sprintf "%s %s" c.Label c.Value)
+                Label(c.Label)
+                    .font(size = Theme.Font.footnote, attributes = FontAttributes.Bold)
+                    .textColor(urgencyColor c.Urgency)
+                    .lineBreakMode(LineBreakMode.WordWrap)
+                    .gridColumn(0).gridRow(3)
+                Label(c.Value)
                     .font(size = Theme.Font.title2, attributes = FontAttributes.Bold)
                     .textColor(urgencyColor c.Urgency)
-                    .gridColumn(1).gridRowSpan(3)
+                    .gridColumn(1).gridRowSpan(4)
                     .centerVertical()
+                    .padding(Thickness(Theme.Space.md, 0., 0., 0.))
             | None ->
                 Label("›")
                     .font(size = Theme.Font.title1)
                     .textColor(Theme.brandInk)
-                    .gridColumn(1).gridRowSpan(3)
+                    .gridColumn(1).gridRowSpan(4)
                     .centerVertical()
         })
         .stroke(Theme.brandEdge)
@@ -107,7 +115,7 @@ let private activeJobCard (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
 /// (FS0792).
 let private availableJobRow (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
     Border(
-        Grid(coldefs = [ Star; Auto ], rowdefs = [ Auto; Auto ]) {
+        Grid(coldefs = [ Star; Auto ], rowdefs = [ Auto; Auto; Auto ]) {
             Label(sprintf "%s — %s" j.ServiceName j.CustomerName)
                 .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
                 .textColor(Theme.ink)
@@ -116,20 +124,31 @@ let private availableJobRow (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
                 .font(size = Theme.Font.subhead)
                 .textColor(Theme.inkMuted)
                 .gridColumn(0).gridRow(1)
-            // Headline-scale, urgency as colour: this is the number that
-            // actually changes what the provider does next.
+            // Label and value are split across the two columns rather than
+            // set as one string. Countdown labels range from "Leave in" to
+            // "Late — reportable as a no-show in", and the long one in an
+            // `Auto` column starved the `Star` column of every pixel — the
+            // row rendered as a single clipped line of red with both ends
+            // cut off. The wrapping caption lives on the left where there is
+            // room to wrap; only the clock, which is never wide, sits right.
             match countdownFor model j with
             | Some c ->
-                Label(sprintf "%s %s" c.Label c.Value)
+                Label(c.Label)
+                    .font(size = Theme.Font.footnote, attributes = FontAttributes.Bold)
+                    .textColor(urgencyColor c.Urgency)
+                    .lineBreakMode(LineBreakMode.WordWrap)
+                    .gridColumn(0).gridRow(2)
+                Label(c.Value)
                     .font(size = Theme.Font.title2, attributes = FontAttributes.Bold)
                     .textColor(urgencyColor c.Urgency)
-                    .gridColumn(1).gridRowSpan(2)
+                    .gridColumn(1).gridRowSpan(3)
                     .centerVertical()
+                    .padding(Thickness(Theme.Space.md, 0., 0., 0.))
             | None ->
                 Label("›")
                     .font(size = Theme.Font.title2)
                     .textColor(Theme.inkMuted)
-                    .gridColumn(1).gridRowSpan(2)
+                    .gridColumn(1).gridRowSpan(3)
                     .centerVertical()
         })
         .stroke(Theme.surfaceEdge)
