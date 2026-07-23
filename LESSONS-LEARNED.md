@@ -16,6 +16,18 @@
 
 ## Lessons
 
+### 2026-07-22 — A screenshot verifies the *installed* binary, not the source
+
+**Insight:** `dotnet build -f net10.0-ios -t:Compile` proves the *source* compiles; it does **not** produce an installable `.app`. A screenshot taken after only a compile-gate shows whatever binary was last *installed* — which can be several edits stale. "It compiles", "it packages", and "it is the binary on the device" are three different claims.
+
+**Discovery:** Twice this session (reviewing the redesigned customer and provider Payment screens) I drove a flow to a screen and screenshotted the *previous* design. The compile gate was green and the new code was correct; the installed `.app` simply predated the redesign, because between the review's `-t:Compile` gate and the screenshot I never ran a full `-c Debug` build + reinstall. Caught by the `.app` binary's mtime predating the edits.
+
+**Impact:** This is a third rung under the [rendering-defects lesson](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite): it is not enough to *look* — you must confirm you are looking at *this* code. Before any screenshot review, rebuild `-c Debug` and reinstall, or check the `.app` binary mtime against your last edit.
+
+**Related:** [Rendering defects are structurally invisible...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); Mistake: [A restored session connected to no live hub](#2026-07-22--a-restored-session-connected-to-no-live-hub)
+
+---
+
 ### 2026-07-22 — Rendering defects are structurally invisible to a green test suite
 
 **Insight:** Across one session, every defect found after booting a simulator had been invisible to a passing suite — at the time, 179 to 194 tests, both apps compiling at 0 errors / 0 warnings. In each case the value was correct, correctly typed, and correctly plumbed; it was simply never passed through the function that exists to present it, or two individually-correct halves were composed into a wrong whole. No unit test can see that, because each half passes its own assertion.
@@ -394,6 +406,80 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 ---
 
 ## Mistakes & Fixes
+
+### 2026-07-22 — A restored session connected to no live hub
+
+**Symptom:** A job driven through its states server-side was invisible to the customer app parked on its tracking screen — the status never moved, no chat, no reschedule prompt. Only the client-side countdown pump was alive.
+
+**Attempted:** First suspected SignalR group membership, then checked whether the transitions broadcast at all. Caught by *running* it — the parked app simply not reacting — the same "seeing beats a green suite" technique as the [rendering-defects lesson](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite). A/B proof: identical drive delivered live after a *fresh login* but not after a *restored session*.
+
+**Root Cause:** Both apps started the hub only on the `LoggedIn` message (`MauiProgram.fs` `updateWithHub`, `hubStarted` latch). Task 0b's "stay signed in" restores a returning user straight to Home via `SplashDone` → `RestoreSession`, which never emits `LoggedIn`. So every returning user — the *normal* case once stay-signed-in shipped — held a session but never opened the realtime connection. The demo's centrepiece "the customer's phone lights up while they watch" would have silently failed for any already-signed-in device.
+
+**Fix:** Key hub-start on the post-update **model's `Session`** (present after both login and restore), not the message, with a synchronous `hubStarting` guard so the burst of messages after a restore starts it exactly once. `ac65493`. Both apps.
+
+**Prevention:** When a feature adds a second way to reach an authenticated state (restore alongside login), audit every side effect that was wired to the *first* way. A capability keyed on a message misses states reached by other messages; key it on the state.
+
+**Time Lost:** ~40 min (diagnosis was fast once driven live; the value was catching it at all).
+
+**Severity:** High — demo-critical, both apps, invisible to every test project (none compile `MauiProgram.fs`) and to a fresh-login walkthrough.
+
+**Related:** [Rendering defects...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite); Compromise: [Sessions in plain `Preferences`](#2026-07-22--sessions-are-stored-in-plain-preferences-not-securestorage)
+
+---
+
+### 2026-07-22 — Reviewed a stale `.app`: screenshots showed the pre-redesign screen
+
+**Symptom:** After redesigning the customer (then provider) Payment screen, driving to it showed the *old* flat layout — no bordered receipt card, plain-blue button.
+
+**Attempted:** Briefly suspected the Border/background not rendering. Then checked the installed `.app` binary mtime: it predated the redesign edits.
+
+**Root Cause:** Between the review's `-t:Compile` gate and the screenshot I never ran a full `-c Debug` build + reinstall. `-t:Compile` produces no `.app`, so the sim kept running the previous build. Recurred once (task 15, then task 17) despite knowing it.
+
+**Fix:** Rebuild `-c Debug` + `simctl install` before screenshotting; verify by mtime when in doubt.
+
+**Prevention:** Promoted to the Lesson [A screenshot verifies the installed binary, not the source](#2026-07-22--a-screenshot-verifies-the-installed-binary-not-the-source).
+
+**Time Lost:** ~20 min across both occurrences.
+
+**Severity:** Medium — wasted a review cycle each time; no shipped defect.
+
+---
+
+### 2026-07-22 — Every provider's reviews were authored by one customer ("John R.")
+
+**Symptom:** On every provider profile, all reviews showed the same reviewer — Mike's Plumbing's three all read "John R.".
+
+**Attempted:** Traced from the profile query back into `Seed.fs`.
+
+**Root Cause:** Finished jobs assigned the provider by `(i*3) % 20` (step 3, coprime with 20 providers) and the customer by `i % 20` (step 1). A provider recurs every 20 jobs; at exactly those `i` the customer index lands on the same value every lap → one customer per provider. Reviews seed from a provider's own closed jobs, so a provider's whole review history came from one customer.
+
+**Fix:** Add a lap offset `(i + i / provs.Length)` to the finished jobs' customer index → three consecutive, distinct customers per provider. `53a2315`. **Cascade:** the fix moved a *`Completed`* (non-terminal) seeded job onto the demo login, exposing a latent tell — half the seeded history was `Completed`, which lingers on Home as "settling up" forever. Made all historical jobs `Closed`; two endpoint tests that arbitrarily picked a `Completed` job now pick a `Closed` one. `3fda1cb`. Seed determinism (run-to-run snapshot equality) preserved; 196 tests pass.
+
+**Prevention:** When two indices with different strides address parallel arrays, a shared period makes them alias — vary the stride or add a lap term. And: a state that is *transient in the live flow* (`Completed` → settling → `Closed`, minutes) must not appear in *seeded history*, where it becomes permanent.
+
+**Time Lost:** ~35 min (including the cascade + test fix).
+
+**Severity:** Medium — a data tell visible on the second profile anyone opened.
+
+**Related:** [Rendering defects...](#2026-07-22--rendering-defects-are-structurally-invisible-to-a-green-test-suite)
+
+---
+
+### 2026-07-22 — A MAUI native `Switch` does not flip on a synthetic tap
+
+**Symptom:** Tapping the provider online/offline `Switch` (a real MAUI `Switch` widget, added for HIG correctness) at its centre did nothing across repeated attempts.
+
+**Root Cause:** The simulator's synthetic `tap` does not drive `UISwitch`'s toggle; it wants the drag gesture.
+
+**Fix:** Drive it with a **swipe** across the track (control `swipe` x 332→368, y 158). Worked first time.
+
+**Prevention:** For native toggle controls in the sim, reach for swipe, not tap. Noted in the walkthrough handoff so it doesn't recur.
+
+**Time Lost:** ~5 min.
+
+**Severity:** Low — automation quirk, not an app defect.
+
+---
 
 ### 2026-07-22 — Memoised the map's HTML string but rebuilt its source object every render
 
@@ -831,6 +917,34 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ## Solution Gaps
 
+### 2026-07-22 — The provider reaches Payout only by tapping Complete itself
+
+**Current State:** The customer auto-advances to Payment on the `HubJobUpdated` "Completed" event while parked on Tracking. The provider's equivalent nav to Payout lives in the `JobActioned` (own-action) branch, not `HubJobUpdated`.
+
+**Limitation:** Driving a job to `Completed` via external `PUT /jobs/{id}/complete` updates the provider's *status* ("Work complete — awaiting payment") but does **not** navigate it to Payout — only the provider tapping **Complete in-app** does. This is arguably correct (the provider settles up through its own action), but it means the two provider screens Payout and Rate-customer cannot be screenshotted by server-side driving; they need the in-app tap, i.e. the real two-app walkthrough.
+
+**Closing this gap requires:** nothing to *fix* — it is a reachability property, documented so the walkthrough drives the final Complete through the UI. If a future automated check wants Payout, it must tap, not curl.
+
+**Priority:** Low — behavioural note, captured in the walkthrough handoff.
+
+**Related:** Compromise: [Both apps pinned to Light](#2026-07-22--both-apps-are-pinned-to-light-appearance) (also verified via the two-app flow)
+
+---
+
+### 2026-07-22 — CC0 image sourcing is noisy and needs per-image curation
+
+**Current State:** Sample trade photos were pulled from Openverse filtered to `license=cc0`, downloaded via `curl`, and loaded into the sim library with `simctl addmedia`; the on-target set plus attribution lives under `demo/sample-photos/`.
+
+**Limitation:** A CC0 keyword search returns tangential results — "car engine repair" surfaced a dealership building and a locomotive; "electrical panel" surfaced an analog computer; "cleaning supplies" surfaced a geology image. Roughly a third had to be viewed and rejected by hand. There is no way to get a clean per-trade set without looking at each image.
+
+**Current workaround:** Curated by eye down to ten genuinely on-target photos; off-target ones dropped from both the committed set and the About-page credits. One file arrived as WebP mislabelled `.jpg` (broke `sips -Z`); converted with `sips -s format jpeg`.
+
+**Closing this gap requires:** a hand-picked set if higher quality is wanted (a couple of hours), or accepting that the operator simply won't attach the weaker ones.
+
+**Priority:** Low — the demo only needs one good photo per trade to attach in chat.
+
+---
+
 ### 2026-07-22 — The two-app walkthrough is only half run
 
 **Current State:** Sign-in, job isolation with two live clients, booking through the real flow, the booking appearing live on the provider, accept, and the full running-late propose/answer loop are all verified on two simulators with screenshots.
@@ -1063,6 +1177,8 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 **Impact:** Anyone who prefers Dark Mode gets Light. For a pitch demo that is invisible; for a shipped product it would not be.
 
 **Prevention going forward:** The rationale is written **in the plist, at the point someone would delete the key** — not only here. Lifting the pin is gated on a real dark palette existing in `Theme.fs`, which is Phase 4 work.
+
+**Updated 2026-07-22 (redesign session):** Deferral affirmed with the user after the full redesign, once the cost was clear. In Fabulous MVU this is **not** a palette swap: `Theme.*` are static values bound at module load, so real dark mode means adding an `Appearance` to the Model, subscribing to the system appearance-changed event, and threading it through **~80 `Theme.*` call sites** across every view (plus unpinning both plists and a screenshot pass in *both* appearances). That is a broad, whole-app refactor — its own scoped task, deliberately not attempted at the tail of a long session. Accepted recurrence: the Light pin ships for the demo.
 
 **Revisit When:** `Theme.fs` gains a dark ramp, or Fabulous exposes MAUI's `AppThemeBinding`.
 
