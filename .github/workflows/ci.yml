@@ -17,7 +17,9 @@ name: CI
 #     the test projects structurally cannot see. Hard pass/fail.
 #     It lives on macOS because the iOS workload will not install on Linux at all
 #     ("Workload ID ios isn't supported on this platform" — confirmed on the
-#     2026-07-23 run that first tried it on ubuntu).
+#     2026-07-23 run that first tried it on ubuntu). It installs the full `maui`
+#     workload, not just `ios`: restore evaluates both the project's TFMs and
+#     needs the android workload manifest present even though only iOS is built.
 #   - build-apps (macOS): the FULL package build. Self-skips on this image's
 #     actool-under-MSBuild defect and still reports success — see its annotation.
 #     Proves packaging when the image works; does not gate view code.
@@ -98,8 +100,15 @@ jobs:
   # "Workload ID ios isn't supported on this platform" (confirmed 2026-07-23),
   # so this cannot run on the cheaper ubuntu Tests job however much we'd prefer.
   #
-  # `ios`, not `maui`: the compile gate needs only the iOS SDK/ref packs, and
-  # the narrower workload installs faster.
+  # `maui`, not `ios`, even though only the iOS TFM is compiled: both apps target
+  # `net10.0-android;net10.0-ios`, and `dotnet build -f net10.0-ios` still
+  # *evaluates* every TFM during restore, so the android workload manifest must
+  # be present or restore fails NETSDK1147 ("maui-android must be installed")
+  # before the compiler ever runs — which is exactly what the first macOS run hit
+  # with only `ios` installed. `maui` (a superset of maui-android + maui-ios)
+  # satisfies the restore check; `-f net10.0-ios` still means android is never
+  # built, so no Java SDK is needed. A local build masks this because dev
+  # machines already have the full `maui` workload.
   compile-gate:
     name: View-code compile gate (iOS)
     runs-on: macos-latest
@@ -110,8 +119,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Install iOS workload
-        run: dotnet workload install ios
+      - name: Install MAUI workload
+        run: dotnet workload install maui
 
       - name: Compile both apps (net10.0-ios -t:Compile)
         run: |
