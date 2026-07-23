@@ -137,7 +137,33 @@ let update (deps: ApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         // the back-re-books fix, caught by the walkthrough.
         Nav.resetTo (Tracking job.Id) m,
         apiCmd (fun () -> deps.GetLocation job.ProviderId) HubLocationUpdated
-    | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
+    | ApiError e ->
+        // The error bar used to be cleared only by a tap on it, so a message
+        // about one screen's failed action followed the user across every other
+        // screen until they happened to hit it. It now expires on its own after
+        // ~7s of *real* time, matching the notice queue, and the token stops an
+        // older error's timer from wiping a newer one.
+        let token = model.ErrorToken + 1
+        { model with Error = Some e; ErrorToken = token; SigningIn = false },
+        delayCmd 7000 (ErrorExpired token)
+    | ErrorExpired token ->
+        if token = model.ErrorToken then { model with Error = None }, Cmd.none
+        else model, Cmd.none
+    | DataReset ->
+        // The backend was reseeded, so every job id this app holds may now
+        // belong to nothing. Drop the stale world rather than patching it, land
+        // on Home, and refetch — anything else leaves the two phones describing
+        // different demos, which is how "Job 81 not found" reached a customer
+        // parked on a job that had ceased to exist.
+        let m =
+            Nav.resetTo Home
+                { model with Jobs = []; Messages = []; PaymentResult = None
+                             Notices = []; ProviderPositions = Map.empty }
+        m,
+        match model.Session with
+        | Some s -> Cmd.batch [ apiCmd (fun () -> deps.GetJobs s.UserId) JobsLoaded
+                                apiCmd deps.GetClock ClockSynced ]
+        | None -> Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
     | ClockSynced dto ->
         match clockOfDto dto with

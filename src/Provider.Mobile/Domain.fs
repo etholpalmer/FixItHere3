@@ -94,7 +94,11 @@ type Model =
       /// that a modal is usually laziness, and an inline bar keeps the job it
       /// refers to on screen while the question is asked.
       ConfirmingCancel: int option
-      Error: string option }
+      Error: string option
+      /// Generation token for the error bar's self-dismissal. A bare delayed
+      /// `DismissError` would let an *old* error's timer wipe a newer one that
+      /// replaced it — the same stale-timer shape as `TypingToken`.
+      ErrorToken: int }
 
 /// What the marketplace may offer this provider right now.
 ///
@@ -129,7 +133,7 @@ module Model =
           Notices = []; NextNoticeId = 1
           Clock = None; DemoNow = DemoClock.epoch; TickActive = false
           ConfirmingCancel = None
-          Error = None }
+          Error = None; ErrorToken = 0 }
 
 type Msg =
     | SplashDone
@@ -207,6 +211,10 @@ type Msg =
     | DemoTick
     | ClockSynced of DemoClockDto
     | DismissError
+    /// The operator reseeded the backend. Everything this app holds is stale.
+    | DataReset
+    /// Self-dismissal, ignored unless it names the error still on screen.
+    | ErrorExpired of token: int
     | ApiError of string
 
 type ProviderApiDeps =
@@ -243,13 +251,20 @@ type ProviderApiDeps =
       SendTyping: int -> int -> string -> unit
       SendSeen: int -> int -> string -> unit }
 
+/// Navigation, and the one thing that must not survive it.
+///
+/// Every move clears `Error`. The bar reports the failure of an action taken
+/// on the screen you were looking at, so it is meaningless on the next one —
+/// and it used to follow the user everywhere until they happened to tap it.
+/// Clearing lives here rather than in each `update` arm so a new call site
+/// cannot forget: there is no way to change screen without going through these.
 module Nav =
-    let push (m: Model) (s: Screen) = { m with Screen = s; History = m.Screen :: m.History }
+    let push (m: Model) (s: Screen) = { m with Screen = s; History = m.Screen :: m.History; Error = None }
     let back (m: Model) =
         match m.History with
-        | prev :: rest -> { m with Screen = prev; History = rest }
-        | [] -> { m with Screen = Home; History = [] }
-    let resetTo (s: Screen) (m: Model) = { m with Screen = s; History = [] }
+        | prev :: rest -> { m with Screen = prev; History = rest; Error = None }
+        | [] -> { m with Screen = Home; History = []; Error = None }
+    let resetTo (s: Screen) (m: Model) = { m with Screen = s; History = []; Error = None }
 
 [<AutoOpen>]
 module Domain =

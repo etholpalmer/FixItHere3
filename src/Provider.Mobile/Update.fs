@@ -174,7 +174,34 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             Nav.push m (Payment job.Id),
             Cmd.batch [ delayCmd 2000 (PaymentDelayDone job.Id); backOnline ]
         | _ -> m, Cmd.none
-    | ApiError e -> { model with Error = Some e; SigningIn = false }, Cmd.none
+    | ApiError e ->
+        // The error bar used to be cleared only by a tap on it, so a message
+        // about one screen's failed action followed the user across every other
+        // screen until they happened to hit it. It now expires on its own after
+        // ~7s of *real* time, matching the notice queue, and the token stops an
+        // older error's timer from wiping a newer one.
+        let token = model.ErrorToken + 1
+        { model with Error = Some e; ErrorToken = token; SigningIn = false },
+        delayCmd 7000 (ErrorExpired token)
+    | ErrorExpired token ->
+        if token = model.ErrorToken then { model with Error = None }, Cmd.none
+        else model, Cmd.none
+    | DataReset ->
+        // The backend was reseeded, so every job id this app holds may now
+        // belong to nothing. Drop the stale world rather than patching it, land
+        // on Home, and refetch — anything else leaves the two phones describing
+        // different demos. The shift flag is re-hydrated too: the reseed resets
+        // it server-side, and availability is derived from these jobs.
+        let m =
+            Nav.resetTo Home
+                { model with Jobs = []; Messages = []; PaymentResult = None
+                             Notices = []; ConfirmingCancel = None }
+        m,
+        match model.Session with
+        | Some s -> Cmd.batch [ apiCmd (fun () -> deps.GetMyJobs s.UserId) JobsLoaded
+                                apiCmd deps.GetClock ClockSynced
+                                apiCmd (fun () -> deps.GetProvider s.UserId) ProviderHydrated ]
+        | None -> Cmd.none
     | DismissError -> { model with Error = None }, Cmd.none
     | ClockSynced dto ->
         match clockOfDto dto with

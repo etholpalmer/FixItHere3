@@ -102,6 +102,37 @@ let up msg model = Update.update stubDeps msg model |> fst
 /// messages — which is how the notice queue has to be exercised at all.
 let up' msg model = up msg model
 
+
+[<Fact>]
+let ``an error does not follow the user to the next screen`` () =
+    let errored = up (ApiError "Job 81 not found") { Model.initial with Screen = Home }
+    Assert.Equal(Some "Job 81 not found", errored.Error)
+    Assert.Equal(None, (up (Navigate (JobDetail 7)) errored).Error)
+    Assert.Equal(None, (up GoBack errored).Error)
+
+[<Fact>]
+let ``a stale error timer cannot wipe the error that replaced it`` () =
+    let first = up (ApiError "first") Model.initial
+    let second = up (ApiError "second") first
+    Assert.Equal(Some "second", (up (ErrorExpired first.ErrorToken) second).Error)
+    Assert.Equal(None, (up (ErrorExpired second.ErrorToken) second).Error)
+
+[<Fact>]
+let ``a data reset drops the stale world and refetches`` () =
+    let asked = ResizeArray<int>()
+    let deps = { stubDeps with GetMyJobs = fun id -> asked.Add id; Task.FromResult(Ok []) }
+    let session : Session = { Token = "fake-provider-4"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" }
+    let model =
+        { Model.initial with
+            Screen = ActiveJob 81; Session = Some session
+            Jobs = [mkJob 81 "EnRoute"]; Error = Some "Job 81 not found" }
+    let m, cmd = Update.update deps DataReset model
+    cmd |> List.iter (fun sub -> sub ignore)
+    Assert.Equal(Home, m.Screen)
+    Assert.Empty(m.Jobs)
+    Assert.Equal(None, m.Error)
+    Assert.Contains(4, asked)
+
 [<Fact>]
 let ``a restored session hydrates the shift flag, like login does`` () =
     // Online lives on the server. Restoring without asking for it starts from

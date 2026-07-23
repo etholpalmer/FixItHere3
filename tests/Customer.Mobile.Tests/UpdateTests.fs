@@ -97,6 +97,42 @@ let up msg model = Update.update stubDeps msg model |> fst
 /// messages — which is how the notice queue has to be exercised at all.
 let up' msg model = up msg model
 
+
+[<Fact>]
+let ``an error does not follow the user to the next screen`` () =
+    // The bar reports the failure of an action taken on the screen you were
+    // looking at. It used to be cleared only by a tap on it, so a message about
+    // one screen followed you across every other until you happened to hit it.
+    let errored = up (ApiError "Job 81 not found") { Model.initial with Screen = Home }
+    Assert.Equal(Some "Job 81 not found", errored.Error)
+    Assert.Equal(None, (up (Navigate Catalog) errored).Error)
+    Assert.Equal(None, (up GoBack errored).Error)
+
+[<Fact>]
+let ``a stale error timer cannot wipe the error that replaced it`` () =
+    let first = up (ApiError "first") Model.initial
+    let second = up (ApiError "second") first
+    // The first error's timer fires late, naming a token that is no longer current.
+    Assert.Equal(Some "second", (up (ErrorExpired first.ErrorToken) second).Error)
+    Assert.Equal(None, (up (ErrorExpired second.ErrorToken) second).Error)
+
+[<Fact>]
+let ``a data reset drops the stale world and refetches`` () =
+    // Reseeding restarts the id sequences, so held jobs may reference nothing.
+    let asked = ResizeArray<int>()
+    let deps = { stubDeps with GetJobs = fun id -> asked.Add id; Task.FromResult(Ok []) }
+    let session : Session = { Token = "fake-customer-1"; UserId = 1; Role = "Customer"; DisplayName = "John" }
+    let model =
+        { Model.initial with
+            Screen = Tracking 81; Session = Some session
+            Jobs = [mkJob 81 "EnRoute"]; Error = Some "Job 81 not found" }
+    let m, cmd = Update.update deps DataReset model
+    cmd |> List.iter (fun sub -> sub ignore)
+    Assert.Equal(Home, m.Screen)
+    Assert.Empty(m.Jobs)
+    Assert.Equal(None, m.Error)
+    Assert.Contains(1, asked)
+
 [<Fact>]
 let ``splash advances to Login`` () =
     Assert.Equal(Login, (up SplashDone { Model.initial with Screen = Splash }).Screen)

@@ -22,6 +22,12 @@ type IBroadcaster =
     /// Broadcast to everyone on purpose: it is not job-scoped, every client
     /// needs it, and it carries no one's data.
     abstract ClockUpdated: DemoClockDto -> Task
+    /// The database was torn down and reseeded. Every connected client is now
+    /// holding jobs that no longer exist — ids are not stable across a reseed —
+    /// so this tells them to throw their world away and refetch. Broadcast to
+    /// everyone for the same reason as ClockUpdated: it is not job-scoped and
+    /// carries no one's data.
+    abstract DataReset: unit -> Task
     /// A reschedule negotiation moved. The job DTO carries the whole new
     /// sub-status, so the client re-renders rather than patching; `outcome` is
     /// the copy key ("ProposalRaised" | "PromiseMoved" | "PromiseStands" |
@@ -38,6 +44,7 @@ type NullBroadcaster() =
         member _.ProviderUpdated _ = Task.CompletedTask
         member _.ClockUpdated _ = Task.CompletedTask
         member _.RescheduleChanged (_, _) = Task.CompletedTask
+        member _.DataReset () = Task.CompletedTask
 
 /// The job's reschedule columns as the domain type. Empty strings are the
 /// absent case — see Dtos.JobDto for why the wire is flat rather than nested.

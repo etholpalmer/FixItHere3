@@ -153,6 +153,11 @@ let mapAll (app: WebApplication) =
             // would make the whole freshly-reset list instantly overdue.
             let restarted = clock.Reset()
             do! hub.ClockUpdated (Clock.toDto restarted DateTimeOffset.UtcNow)
+            // Tell the phones as well. EnsureDeleted/EnsureCreated restarts the
+            // id sequences, so every open app is now holding jobs that do not
+            // exist — acting on one returns "Job 81 not found" and the operator
+            // is left with two screens describing different worlds.
+            do! hub.DataReset ()
             return okJson "reset" })) |> ignore
 
     /// Pull a seeded job into the live demo.

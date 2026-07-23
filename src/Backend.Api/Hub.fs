@@ -58,6 +58,7 @@ type SignalRBroadcaster(ctx: IHubContext<DemoHub>) =
         //   ProviderUpdated is catalogue freshness every browsing customer wants.
         member _.LocationUpdated dto = ctx.Clients.All.SendAsync("LocationUpdated", dto)
         member _.ProviderUpdated dto = ctx.Clients.All.SendAsync("ProviderUpdated", dto)
+        member _.DataReset () = ctx.Clients.All.SendAsync("DataReset")
         //   ClockUpdated is global state carrying nobody's data — every client
         //     needs it, including ones with no job in flight.
         member _.ClockUpdated dto = ctx.Clients.All.SendAsync("ClockUpdated", dto)
