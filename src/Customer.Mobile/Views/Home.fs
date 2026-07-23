@@ -115,4 +115,12 @@ let view (model: Model) =
                         (urgencyColor c.Urgency)
                 | None ->
                     jobRow (Navigate (Tracking j.Id)) title (statusOf j.State) Theme.inkMuted
+
+        // Quiet, at the foot of the screen: an About page a real product has,
+        // carrying the sample-photo credits.
+        Button("About", Navigate About)
+            .font(size = Theme.Font.footnote)
+            .textColor(Theme.inkMuted)
+            .horizontalOptions(Microsoft.Maui.Controls.LayoutOptions.Center)
+            .padding(Thickness(0., Theme.Space.xl, 0., 0.))
      }).padding(Theme.screenMargin))

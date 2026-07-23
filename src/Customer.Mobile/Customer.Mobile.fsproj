@@ -66,6 +66,7 @@
     <Compile Include="Views/Chat.fs" />
     <Compile Include="Views/Payment.fs" />
     <Compile Include="Views/Rating.fs" />
+    <Compile Include="Views/About.fs" />
     <Compile Include="Views/Root.fs" />
     <Compile Include="MauiProgram.fs" />
   </ItemGroup>

@@ -39,6 +39,7 @@ type Screen =
     | Chat of jobId: int
     | Payment of jobId: int
     | Rating of jobId: int
+    | About
 
 type Model =
     { Screen: Screen
