@@ -1262,7 +1262,7 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
-### 2026-07-23 — Two build warnings that local verification has been filtering out
+### 2026-07-23 — A warning filter hid two real findings (both now fixed; the filter is the lesson)
 
 **Current State:** CI's annotations surfaced a warning nobody here had seen: `FS3391` at [DevEndpoints.fs:172](src/Backend.Api/DevEndpoints.fs) (implicit `int` → `Nullable<int>` conversion). Re-running the build locally without a filter also shows `NU1903`: `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 has a **known high-severity vulnerability** ([GHSA-2m69-gcr7-jv3q](https://github.com/advisories/GHSA-2m69-gcr7-jv3q)).
 
@@ -1271,9 +1271,9 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 **Closing this gap requires:**
 1. Stop filtering warnings out of build output — use `grep -E "error|warning|Build succeeded"` or read the tail — ~0 min, a habit — pending
 2. Bump `SQLitePCLRaw` past the advisory and confirm the suite still passes — ✅ **shipped `00a8f49`**: a direct `SQLitePCLRaw.bundle_e_sqlite3` 2.1.12 pin in `Backend.Api.fsproj` overrides the 2.1.11 EF Core 10.0.10 pulls in. `dotnet nuget why` confirms the whole trio resolves to 2.1.12 across every path including the test project (the pin propagates through the `ProjectReference`, so no second pin was needed); `NU1903` is gone from both projects; 48 backend tests still pass.
-3. Make the `Nullable` conversion explicit at `DevEndpoints.fs:172` rather than suppressing `FS3391` — ~10 min — pending
+3. Make the `Nullable` conversion explicit at `DevEndpoints.fs:172` rather than suppressing `FS3391` — ✅ **shipped `043d9cf`**: annotating `err`'s `code: int` keeps the int->Nullable conversion at the definition instead of the `err 404` call site, matching the sibling `err` in `Endpoints.fs`. Backend now builds with zero warnings.
 
-**Priority:** Medium — the advisory (item 2) is resolved; what remains is the `FS3391` tidy-up and the durable habit of not filtering warnings, which is the finding that actually matters here.
+**Priority:** Low, now that both warnings are fixed. The one thing that outlives this entry is item 1 — the habit. Both findings existed for the whole session and neither showed, because the build filter (`grep -E "error|Build succeeded"`) is structurally incapable of surfacing a warning; the reviewer checklist's "0 warnings shown, not assumed" was being met in letter and defeated in practice. That is the finding. The two specific warnings were only its evidence.
 
 ---
 
