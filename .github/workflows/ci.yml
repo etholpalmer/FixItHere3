@@ -23,10 +23,19 @@ name: CI
 #   - build-apps (macOS): the FULL package build. Self-skips on this image's
 #     actool-under-MSBuild defect and still reports success — see its annotation.
 #     Proves packaging when the image works; does not gate view code.
+# PAUSED 2026-07-24 (second pause; see the 2026-07-20 note above for the first).
+# CI now runs locally: scripts/ci-local.sh mirrors these jobs and is wired into
+# .githooks/pre-push, so the same gates run before any push leaves the machine.
+# This workflow stays manually runnable from the Actions tab (workflow_dispatch)
+# for an occasional clean-room check — note the repo is public, so Actions
+# minutes are free; the pause is about running the gate locally, not cost.
+# To restore automatic CI, replace the `on:` block with:
+#   on:
+#     push:
+#     pull_request:
+#       branches: [main]
+#     workflow_dispatch:
 on:
-  push:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 # A newer push to the same branch makes an in-flight run obsolete.

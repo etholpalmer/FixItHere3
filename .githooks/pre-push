@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Pre-push gate: run local CI (tests + iOS view-code compile gate) before any
+# push leaves this machine. This replaced the automatic GitHub Actions run —
+# see scripts/ci-local.sh and the paused-trigger note in .github/workflows/ci.yml.
+#
+# Activate once per clone:   git config core.hooksPath .githooks
+# Escape hatch (use rarely): SKIP_CI=1 git push
+#
+# Pushing a deletion (e.g. `git push origin :branch`) sends no commits; skip.
+if [ -n "${SKIP_CI:-}" ]; then
+  echo "pre-push: SKIP_CI set — skipping local CI gate." >&2
+  exit 0
+fi
+
+any_commits=false
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
+    any_commits=true
+  fi
+done
+$any_commits || exit 0
+
+exec "$(git rev-parse --show-toplevel)/scripts/ci-local.sh"

@@ -73,6 +73,22 @@ screen is the loudest tell there is.
 dotnet test
 ```
 
+## Local CI
+
+CI runs on this machine, not in the cloud: `scripts/ci-local.sh` mirrors the
+paused GitHub workflow's gates (the four test suites + the iOS view-code
+compile gate) and `.githooks/pre-push` runs it before every push. Activate the
+hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Options: `--tests-only`, `--full` (adds the full iOS package build),
+`--linux` (runs the test suites in a Linux container via Docker — the
+platform leg the cloud run used to provide). Escape hatch: `SKIP_CI=1 git push`.
+The GitHub workflow remains manually runnable from the Actions tab.
+
 ## Projects
 
 - `src/Shared` — pure F# domain: types, DTOs, Job state machine
