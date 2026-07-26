@@ -28,6 +28,12 @@ module Travel =
         if Double.IsNaN km || km <= 0.0 then minMinutes
         else max minMinutes (km / averageKmh * 60.0)
 
+    /// How close the provider must be to the customer to count as "here" — the
+    /// gate on marking Arrived. The drive lands the provider on the job's exact
+    /// coordinates, so anything under a city block confirms they actually made
+    /// the trip rather than tapping Arrived from across town.
+    let arrivedWithinKm = 0.25
+
     /// True once the estimate has bottomed out on the floor above — the
     /// provider is at the door and the number has stopped meaning anything.
     ///

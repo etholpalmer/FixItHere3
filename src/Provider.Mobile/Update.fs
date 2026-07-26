@@ -407,7 +407,15 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
                   delayCmd 5000 (AutoReplyDue m2.JobId)
               else Cmd.none ]
         m, Cmd.batch cmds
-    | HubLocationUpdated _ -> model, Cmd.none
+    | HubLocationUpdated loc ->
+        // Track my own live position from the drive the server is running, so
+        // the app knows where it is — until now it ignored this and only the
+        // map's own WebView moved. Without it, "Arrived" cannot be gated on
+        // actually being at the customer (the whole point below). Only my own
+        // updates matter; other providers' positions are noise here.
+        match model.Session with
+        | Some s when loc.ProviderId = s.UserId -> { model with MyLocation = (loc.Lat, loc.Lng) }, Cmd.none
+        | _ -> model, Cmd.none
     | HubProviderUpdated dto ->
         // Reflect my own online state if it was changed elsewhere (e.g. /dev console).
         match model.Session with

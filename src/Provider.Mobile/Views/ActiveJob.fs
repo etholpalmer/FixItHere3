@@ -174,20 +174,37 @@ let private nextActionButton (label: string) (msg: Msg) =
 /// confirm: the button becomes "Yes — <label>" with a plain "Not yet" beneath,
 /// so a stray tap on the map can't skip an irreversible step. Depart is one tap.
 let private actionRow (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
+    let nextEv =
+        JobStateCodec.tryParse j.State |> Option.bind JobStatus.nextProviderAction |> Option.map snd
+    // Arrived is withheld until the provider is actually at the customer — you
+    // cannot arrive (and then start work) from across the city. Everything after
+    // Arrived necessarily happens at the location, so gating this one step is
+    // enough. The map already shows the gap; this keeps the button honest to it.
+    let arriveButTooFar = nextEv = Some Arrive && not (atJobLocation model j)
     VStack(spacing = Theme.Space.xs) {
-        match actionButton j with
-        | Some (label, msg, needsConfirm) ->
-            if needsConfirm && model.ConfirmingAction = Some j.Id then
-                nextActionButton (sprintf "Yes — %s" label) (ConfirmAction j.Id)
-                Button("Not yet", DismissAction)
-                    .font(size = Theme.Font.callout)
-                    .textColor(Theme.inkMuted)
-                    .horizontalOptions(Microsoft.Maui.Controls.LayoutOptions.Center)
-            elif needsConfirm then
-                nextActionButton label (RequestAction j.Id)
-            else
-                nextActionButton label msg
-        | None -> ()
+        if arriveButTooFar then
+            Label(sprintf "%.1f km from %s" (Geo.distanceKm model.MyLocation (j.Lat, j.Lng)) j.CustomerName)
+                .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
+                .textColor(Theme.inkMuted)
+                .centerTextHorizontal()
+            Label("Head to the customer to mark arrived")
+                .font(size = Theme.Font.footnote)
+                .textColor(Theme.inkMuted)
+                .centerTextHorizontal()
+        else
+            match actionButton j with
+            | Some (label, msg, needsConfirm) ->
+                if needsConfirm && model.ConfirmingAction = Some j.Id then
+                    nextActionButton (sprintf "Yes — %s" label) (ConfirmAction j.Id)
+                    Button("Not yet", DismissAction)
+                        .font(size = Theme.Font.callout)
+                        .textColor(Theme.inkMuted)
+                        .horizontalOptions(Microsoft.Maui.Controls.LayoutOptions.Center)
+                elif needsConfirm then
+                    nextActionButton label (RequestAction j.Id)
+                else
+                    nextActionButton label msg
+            | None -> ()
     }
 
 /// Chat, Call, Cancel — visibly secondary to the action button above: plain

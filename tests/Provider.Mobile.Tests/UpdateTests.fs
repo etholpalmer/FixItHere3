@@ -118,6 +118,30 @@ let up msg model = Update.update stubDeps msg model |> fst
 let up' msg model = up msg model
 
 [<Fact>]
+let ``the provider tracks its own live position but ignores other providers'`` () =
+    // MyLocation must follow the server-driven trip so "Arrived" can be gated on
+    // actually being there. Only my own updates count.
+    let me : Session = { Token = "t"; UserId = 4; Role = "Provider"; DisplayName = "Elite HVAC" }
+    let m0 = { Model.initial with Session = Some me; MyLocation = (43.70, -79.45) }
+    let mine : LocationDto = { ProviderId = 4; Lat = 43.665; Lng = -79.41; UpdatedAt = "" }
+    Assert.Equal((43.665, -79.41), (up (HubLocationUpdated mine) m0).MyLocation)
+    let other : LocationDto = { ProviderId = 9; Lat = 1.0; Lng = 2.0; UpdatedAt = "" }
+    Assert.Equal((43.70, -79.45), (up (HubLocationUpdated other) m0).MyLocation)  // untouched
+
+[<Fact>]
+let ``Arrived is gated on being at the customer`` () =
+    let job = mkJob 7 "EnRoute"                    // job at 43.70, -79.40 (see mkJob)
+    // Far away: not at the location.
+    let far = { Model.initial with MyLocation = (43.80, -79.20) }
+    Assert.False(atJobLocation far job)
+    // Essentially on the pin (the drive lands on the job's coordinates).
+    let here = { Model.initial with MyLocation = (43.70, -79.40) }
+    Assert.True(atJobLocation here job)
+    // …and just outside the block-sized threshold is still "not here".
+    let nearish = { Model.initial with MyLocation = (43.70 + 0.02, -79.40) }  // ~2 km north
+    Assert.False(atJobLocation nearish job)
+
+[<Fact>]
 let ``a progress action arms on the first tap and does not advance the job`` () =
     // The guard against a stray tap on the map screen: RequestAction only arms
     // the confirm — it must NOT fire any transition.

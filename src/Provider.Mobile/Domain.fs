@@ -342,6 +342,15 @@ module Domain =
         | Some _ -> Availability.OnAJob
         | None -> if m.Online then Availability.Available else Availability.Offline
 
+    /// Whether the provider is close enough to the customer to mark Arrived.
+    /// `MyLocation` tracks the server-driven trip (see HubLocationUpdated), and
+    /// the drive lands on the job's exact coordinates — so before it finishes the
+    /// provider is visibly across town, and offering Arrived there lets a job be
+    /// "arrived" (and then worked) from kilometres away. The map already shows
+    /// the gap; this stops the button contradicting it.
+    let atJobLocation (m: Model) (j: JobDto) =
+        Geo.distanceKm m.MyLocation (j.Lat, j.Lng) <= Travel.arrivedWithinKm
+
     /// True when an incoming hub chat message should trigger a canned auto-reply:
     /// auto-reply is enabled, the message isn't my own, and the sender is the
     /// customer on one of my jobs.
