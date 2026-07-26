@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-23 (all 19 plan tasks complete. Post-plan fixes from live use: map markers, countdown legibility, provider availability, error-bar lifetime, reseed resync, the demo pair, cold Cmd helpers, the SQLite advisory, and the provider no-show countdown. CI green with a macOS view-code gate, required on main. Full two-app simulation run end to end — chat crossing + seen receipts verified live)
+- **Last Updated:** 2026-07-24 (all 19 plan tasks complete; Tier-1 accepted-job marker shipped. Latest post-plan fixes from live use: two-tap confirm on the provider's progress actions, and Arrived gated on being at the customer — the app now tracks its own position, which the map-side channel had been hiding. One-command demo spin-up (scripts/demo-up.sh). CI local-only via pre-push gate)
 
 ---
 
@@ -52,6 +52,24 @@ The last row is the important nuance, not a footnote: the no-show bug was *fixab
 **Impact:** Reusable for anyone driving these simulators: convert screenshot-pixel coordinates to points (`point = pixel × deviceWidthPt / imageWidthPx`) before tapping, or anchor off elements whose centre is near screen-centre (~220 on the Max) where the error is smallest and least likely to mis-hit. The cost of getting it wrong is not just a missed tap — a mis-hit can fire a *destructive* control (here, Cancel Job), so verify the resulting screen before proceeding. The inline cancel-confirm ("Keep it") is what made that particular slip harmless.
 
 **Related:** [The live two-app run…](#2026-07-23--the-live-two-app-run-is-this-projects-highest-yield-test-and-it-has-never-come-back-empty)
+
+**Updated 2026-07-24 — a second sim-input quirk, same "reproduce cleanly" moral.** While verifying the two-tap confirm, one tap on "Arrived" appeared to jump the job two steps to "Work in progress" with "Complete" already armed. It was not the feature: a simulator connection reset ("Input send… timed out; the simulator likely rebooted") had queued/replayed earlier taps. A clean single-tap reproduction — one tap, screenshot, nothing else — showed the correct armed state. **Simulator input is not reliably one-shot across a reconnect; reproduce a suspected UI bug with a single isolated action before believing it.** Same family as the coordinate quirk above: the simulator is a noisy input channel, so trust a clean reproduction over a first impression.
+
+---
+
+### 2026-07-24 — A view fed by its own side channel outruns what the model knows
+
+**Insight:** The tracking map is a Leaflet page in a WebView that opens **its own** SignalR connection and moves the provider marker from the `LocationUpdated` stream directly. The F# app around it never saw those updates — the provider app's `HubLocationUpdated` was literally `model, Cmd.none`. So the marker glided across the city while `model.MyLocation` sat at its start value. The app *looked* location-aware because the map moved; it was not. That gap is why "mark Arrived from across town" was even possible — the model had no position to gate the button on.
+
+**Discovery:** The user looked at the running provider screen and said the obvious thing the tests could not: "shouldn't be starting work when the two pins are so far apart." The map (side channel) and the button (model) disagreed on screen, in one glance.
+
+**Design intent:** the WebView owning its own hub connection was deliberate and is still right — it keeps the map self-contained and avoids re-running `MapHtml.render` (and dropping the socket) on every model tick, a churn bug this project already fixed. The cost, not appreciated at the time, is that **anything the model needs to reason about — proximity, "am I there yet" — must be fed to the model separately; the map showing it is not the model knowing it.**
+
+**Impact:** The general form to hunt for: a value that is *rendered* from a side channel (a WebView's own socket, a native control's internal state, an animation's own clock) but is *absent from the model*. It reads as present because it's on screen, so logic that should depend on it silently can't. The fix here was to also consume `LocationUpdated` in the model (`MyLocation` now tracks the provider's own position) so the Arrived gate has something real to check.
+
+**Active mitigation:** `atJobLocation` in [Provider Domain.fs](src/Provider.Mobile/Domain.fs) plus its tests — the model-side position is now asserted, not just drawn.
+
+**Related:** [Mistake: Arrived could be tapped from across town](#2026-07-24--arrived-could-be-marked-from-across-town); [Memoised the map's HTML string but rebuilt its source object every render](#2026-07-22--memoised-the-maps-html-string-but-rebuilt-its-source-object-every-render); [The map never tracked live…](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch)
 
 ---
 
@@ -722,6 +740,26 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
+### 2026-07-24 — Arrived could be marked from across town
+
+**Symptom:** Reported from a screenshot: the provider screen said "You have arrived" with a live **Start Work** button while the honey provider marker and the red customer pin were ~5 km apart on the map. You could arrive — and start work — without being anywhere near the customer.
+
+**Attempted:** No dead end; the cause was structural once traced. Caught by the user's eye on the running two-app demo — see [the live two-app run lesson](#2026-07-23--the-live-two-app-run-is-this-projects-highest-yield-test-and-it-has-never-come-back-empty).
+
+**Root Cause:** Two things. (1) The `Arrive` transition had no proximity condition — the state machine is pure and location-free, and nothing in the caller checked distance. (2) More fundamentally, the provider app **could not** have checked, because it ignored its own live position: `HubLocationUpdated` was a no-op, so `model.MyLocation` never followed the server-driven trip even though the map marker did. See [the side-channel lesson](#2026-07-24--a-view-fed-by-its-own-side-channel-outruns-what-the-model-knows).
+
+**Fix:** `2591936`. The model now consumes its own `LocationUpdated` (`MyLocation` tracks the drive), and the Arrived action is withheld until within `Travel.arrivedWithinKm` (0.25) of the job — replaced meanwhile by "<n> km from <customer> — Head to the customer to mark arrived". Gating `Arrive` alone is sufficient: Start Work and Complete only follow it, so they inherit the location. Verified live at 5.0 km (button absent) and again once the drive landed on the pin (button returns). `atJobLocation` is mutation-checked.
+
+**Prevention:** When an action only makes sense at a place/time/state the *world* is in (not just the job's status), the guard needs the real-world fact in the model — drawing it on a map is not having it. Pairs with the same-session two-tap confirm on Arrive/Start/Complete (`f922bf5`): one guard asks "are you sure?", the other asks "is this even valid here?" — different axes, both needed for an irreversible action under a thumb.
+
+**Time Lost:** ~30 min (most of it a false alarm — see the simulator queued-taps note — before the clean reproduction).
+
+**Severity:** Medium — a believability tell on the demo's centrepiece screen; the map plainly contradicted the button.
+
+**Related:** [Lesson: a view fed by its own side channel](#2026-07-24--a-view-fed-by-its-own-side-channel-outruns-what-the-model-knows); [Gap: Arrived proximity is client-side only](#2026-07-24--arrived-proximity-is-enforced-client-side-only)
+
+---
+
 ### 2026-07-23 — The provider's countdown row rendered as one clipped line of red
 
 **Symptom:** Reported from a screenshot: under "Available jobs", the row showed `ate — reportable as a no-show in 43:46` — cut off at both ends, with the trade, the customer and the payout pushed off-screen entirely.
@@ -1319,6 +1357,24 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 ---
 
 ## Solution Gaps
+
+### 2026-07-24 — Arrived proximity is enforced client-side only
+
+**Current State:** The provider app withholds the Arrived button until `MyLocation` is within `Travel.arrivedWithinKm` of the job (`2591936`). The server's `Arrive` transition itself has **no** proximity check — a request that reaches `PUT /jobs/{id}/arrive` is applied regardless of where the provider is.
+
+**Limitation:** The guard is a UI affordance, not an authority. Nothing malicious can happen in the demo (the only client is our own app, and it gates the button), but a direct API call — or the `/dev` console, or a future second client — could still mark a job arrived from anywhere. It also errs *safe* on relaunch: until a fresh `LocationUpdated` arrives, `MyLocation` is stale and the button stays withheld, which is the right failure direction.
+
+**Closing this gap requires:**
+1. Split `arrive` out of the generic `mapTransition` (as `enroute` already is) and check the provider's last-known server position against the job before applying — ~30 min — pending
+2. Return a clear error the app surfaces if it somehow fires while far — ~10 min — pending
+
+**Active mitigation:** The client gate is the mitigation for the demo; the button simply isn't offered until the model's own position confirms arrival.
+
+**Priority:** Low — no demo-reachable path bypasses the client gate; this is authority hygiene for if the API ever faces a client we don't control.
+
+**Related:** [Lesson: a view fed by its own side channel](#2026-07-24--a-view-fed-by-its-own-side-channel-outruns-what-the-model-knows); [Mistake: Arrived could be marked from across town](#2026-07-24--arrived-could-be-marked-from-across-town)
+
+---
 
 ### 2026-07-23 — A warning filter hid two real findings (both now fixed; the filter is the lesson)
 
