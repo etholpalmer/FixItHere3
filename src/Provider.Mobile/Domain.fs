@@ -94,6 +94,12 @@ type Model =
       /// that a modal is usually laziness, and an inline bar keeps the job it
       /// refers to on screen while the question is asked.
       ConfirmingCancel: int option
+      /// The job whose next progress action (Arrive / Start Work / Complete) is
+      /// armed and awaiting a confirming second tap. Each of those advances the
+      /// job irreversibly, and the button sits under a thumb on the map screen,
+      /// so a stray tap must not skip a step. Depart is deliberately not here —
+      /// it is the deliberate "I'm heading out", not a mid-job progress step.
+      ConfirmingAction: int option
       Error: string option
       /// Generation token for the error bar's self-dismissal. A bare delayed
       /// `DismissError` would let an *old* error's timer wipe a newer one that
@@ -133,6 +139,7 @@ module Model =
           Notices = []; NextNoticeId = 1
           Clock = None; DemoNow = DemoClock.epoch; TickActive = false
           ConfirmingCancel = None
+          ConfirmingAction = None
           Error = None; ErrorToken = 0 }
 
 type Msg =
@@ -162,6 +169,12 @@ type Msg =
     /// Asks; does not act. Cancelling is irreversible and was one tap.
     | RequestCancel of jobId: int
     | DismissCancel
+    /// Two-tap guard on the progress actions. `RequestAction` arms the confirm
+    /// (first tap), `ConfirmAction` fires the state's real transition (second
+    /// tap), `DismissAction` backs out. Depart is exempt — it stays one tap.
+    | RequestAction of jobId: int
+    | ConfirmAction of jobId: int
+    | DismissAction
     | CancelJob of jobId: int
     | JobActioned of JobDto
     | GpsTick of jobId: int

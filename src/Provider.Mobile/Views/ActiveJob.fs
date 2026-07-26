@@ -56,6 +56,11 @@ let private statusLine (state: string) (cancelledBy: string) =
 /// The single state-driven next action for this job (spec: one button, driven
 /// by job state). Shared decides *which* transition; this only maps it to the
 /// app's own Msg, so the button label and the event it fires cannot disagree.
+///
+/// Returns the label, the direct Msg, and whether the action needs a confirming
+/// second tap. Arrive / Start Work / Complete each advance the job irreversibly
+/// from a button under the operator's thumb on the map, so they confirm; Depart
+/// (the deliberate "I'm heading out") stays one tap.
 let private actionButton (j: FixItHere.Shared.Dtos.JobDto) =
     JobStateCodec.tryParse j.State
     |> Option.bind JobStatus.nextProviderAction
@@ -67,7 +72,11 @@ let private actionButton (j: FixItHere.Shared.Dtos.JobDto) =
             | StartWork -> BeginWork j.Id
             | CompleteWork -> FinishWork j.Id
             | Accepted | RateAndClose | Cancel | MarkNoShow -> Depart j.Id
-        label, msg)
+        let needsConfirm =
+            match ev with
+            | Arrive | StartWork | CompleteWork -> true
+            | _ -> false
+        label, msg, needsConfirm)
 
 /// Denser provider mirror of the customer Tracking screen's `statusCard`:
 /// who, what, and the two numbers this whole screen exists to show — the
@@ -159,6 +168,28 @@ let private nextActionButton (label: string) (msg: Msg) =
         .background(Theme.success)
         .padding(Thickness(Theme.Space.xs, Theme.Space.xs, Theme.Space.xs, Theme.Space.xs))
 
+/// The next-action row. Always a VStack (one type, so it drops into the Grid
+/// cell cleanly and the CE handles the conditional children — the same shape as
+/// `lateControlsBar`). For Arrive / Start Work / Complete the first tap arms a
+/// confirm: the button becomes "Yes — <label>" with a plain "Not yet" beneath,
+/// so a stray tap on the map can't skip an irreversible step. Depart is one tap.
+let private actionRow (model: Model) (j: FixItHere.Shared.Dtos.JobDto) =
+    VStack(spacing = Theme.Space.xs) {
+        match actionButton j with
+        | Some (label, msg, needsConfirm) ->
+            if needsConfirm && model.ConfirmingAction = Some j.Id then
+                nextActionButton (sprintf "Yes — %s" label) (ConfirmAction j.Id)
+                Button("Not yet", DismissAction)
+                    .font(size = Theme.Font.callout)
+                    .textColor(Theme.inkMuted)
+                    .horizontalOptions(Microsoft.Maui.Controls.LayoutOptions.Center)
+            elif needsConfirm then
+                nextActionButton label (RequestAction j.Id)
+            else
+                nextActionButton label msg
+        | None -> ()
+    }
+
 /// Chat, Call, Cancel — visibly secondary to the action button above: plain
 /// text, no fill, so the eye lands on the one button that actually advances
 /// the job. Asks before acting: cancelling is irreversible and was one tap
@@ -214,9 +245,8 @@ let view (model: Model) (jobId: int) =
                 // The one clear next action. Its own row so it can be
                 // full-width and unmissable — never sharing a row with
                 // Chat/Call/Cancel the way a wall-of-buttons layout would.
-                match actionButton job with
-                | Some (label, msg) -> (nextActionButton label msg).gridRow(3)
-                | None -> ()
+                // Progress steps (Arrive/Start/Complete) arm a confirm here.
+                (actionRow model job).gridRow(3)
 
                 (secondaryBar model job)
                     .padding(Thickness(0., Theme.Space.sm, 0., 0.))

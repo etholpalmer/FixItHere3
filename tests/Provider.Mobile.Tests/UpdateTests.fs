@@ -117,6 +117,38 @@ let up msg model = Update.update stubDeps msg model |> fst
 /// messages — which is how the notice queue has to be exercised at all.
 let up' msg model = up msg model
 
+[<Fact>]
+let ``a progress action arms on the first tap and does not advance the job`` () =
+    // The guard against a stray tap on the map screen: RequestAction only arms
+    // the confirm — it must NOT fire any transition.
+    let armed, cmd = Update.update stubDeps (RequestAction 7) { Model.initial with Jobs = [mkJob 7 "EnRoute"] }
+    Assert.Equal(Some 7, armed.ConfirmingAction)
+    let dispatched = ResizeArray<Msg>()
+    cmd |> List.iter (fun s -> s dispatched.Add)
+    Assert.Empty(dispatched)                                   // nothing fired
+    Assert.Equal("EnRoute", (armed.Jobs |> List.head).State)  // job did not advance
+
+[<Fact>]
+let ``the confirming second tap fires the state's real transition and disarms`` () =
+    let confirmDispatches state =
+        let m = { Model.initial with Jobs = [mkJob 7 state]; ConfirmingAction = Some 7 }
+        let after, cmd = Update.update stubDeps (ConfirmAction 7) m
+        Assert.Equal(None, after.ConfirmingAction)             // disarmed atomically
+        let d = ResizeArray<Msg>()
+        cmd |> List.iter (fun s -> s d.Add)
+        List.ofSeq d
+    Assert.Equal<Msg list>([MarkArrived 7], confirmDispatches "EnRoute")    // Arrive
+    Assert.Equal<Msg list>([BeginWork 7],  confirmDispatches "Arrived")     // Start Work
+    Assert.Equal<Msg list>([FinishWork 7], confirmDispatches "InProgress")  // Complete
+
+[<Fact>]
+let ``backing out and advancing both clear an armed confirm`` () =
+    let armed = { Model.initial with Jobs = [mkJob 7 "EnRoute"]; ConfirmingAction = Some 7 }
+    Assert.Equal(None, (up DismissAction armed).ConfirmingAction)
+    // and a state change (own action or hub push) drops a now-stale confirm
+    Assert.Equal(None, (up (JobActioned (mkJob 7 "Arrived")) armed).ConfirmingAction)
+    Assert.Equal(None, (up (HubJobUpdated (mkJob 7 "Cancelled")) armed).ConfirmingAction)
+
 
 
 [<Fact>]

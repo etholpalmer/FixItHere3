@@ -140,6 +140,23 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
     | FinishWork id -> model, apiCmd (fun () -> deps.Complete id) JobActioned
     | RequestCancel jobId -> { model with ConfirmingCancel = Some jobId }, Cmd.none
     | DismissCancel -> { model with ConfirmingCancel = None }, Cmd.none
+    // First tap arms; it does NOT advance the job. This is the whole point — a
+    // stray tap on the map screen must not skip a step.
+    | RequestAction jobId -> { model with ConfirmingAction = Some jobId }, Cmd.none
+    | DismissAction -> { model with ConfirmingAction = None }, Cmd.none
+    // Second tap. Fire the state's real next transition, reusing the existing
+    // per-action handlers so the event→API mapping lives in one place, and clear
+    // the armed flag so the *next* step starts un-armed rather than pre-confirmed.
+    | ConfirmAction jobId ->
+        let m = { model with ConfirmingAction = None }
+        match m.Jobs |> List.tryFind (fun j -> j.Id = jobId) with
+        | None -> m, Cmd.none
+        | Some j ->
+            match JobStateCodec.tryParse j.State |> Option.bind JobStatus.nextProviderAction with
+            | Some (_, Arrive) -> m, Cmd.ofMsg (MarkArrived jobId)
+            | Some (_, StartWork) -> m, Cmd.ofMsg (BeginWork jobId)
+            | Some (_, CompleteWork) -> m, Cmd.ofMsg (FinishWork jobId)
+            | _ -> m, Cmd.none
     | CancelJob jobId ->
         let req : ReportNoShowRequest =
             { JobId = jobId; ByRole = ActorRole.toWire ActorRole.Provider }
@@ -164,7 +181,9 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)
             then model.Jobs |> List.map (fun j -> if j.Id = job.Id then job else j)
             else job :: model.Jobs
-        let m = { model with Jobs = jobs }
+        // The job advanced, so any armed progress-confirm no longer refers to the
+        // current step — drop it, or the next step would render pre-confirmed.
+        let m = { model with Jobs = jobs; ConfirmingAction = None }
         match model.Screen, job.State with
         | JobDetail id, _ when id = job.Id -> Nav.push m (ActiveJob job.Id), Cmd.none
         | ActiveJob id, "EnRoute" when id = job.Id && m.UseRealGps && not m.GpsLoopActive ->
@@ -363,7 +382,10 @@ let update (deps: ProviderApiDeps) (msg: Msg) (model: Model) : Model * Cmd<Msg> 
             if model.Jobs |> List.exists (fun j -> j.Id = job.Id)
             then model.Jobs |> List.map (fun j -> if j.Id = job.Id then job else j)
             else job :: model.Jobs
-        { model with Jobs = jobs }, Cmd.none
+        // A pushed state change (e.g. the customer cancelled) invalidates any
+        // armed progress-confirm for this job.
+        let confirming = if model.ConfirmingAction = Some job.Id then None else model.ConfirmingAction
+        { model with Jobs = jobs; ConfirmingAction = confirming }, Cmd.none
     | HubMessageReceived m2 ->
         let activeChatJob = match model.Screen with Chat id -> Some id | ActiveJob id -> Some id | _ -> None
         let isMine =
