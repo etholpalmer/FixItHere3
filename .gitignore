@@ -6,3 +6,6 @@ obj/
 *.db-wal
 artifacts/
 .scratch/
+
+# local demo runtime (pids, logs) from scripts/demo-up.sh
+.demo-run/
