@@ -1,7 +1,13 @@
 # FixItHere.Demo
 
-Proof-of-concept for the FixItHere mobile-services marketplace.
-See [`docs/superpowers/specs/2026-07-17-fixithere-demo-prototype-design.md`](docs/superpowers/specs/2026-07-17-fixithere-demo-prototype-design.md).
+Prototype of the FixItHere mobile-services marketplace: a customer books a
+provider, the provider drives to them, they chat live, the job completes, money
+moves, and both rate. Two iOS apps over one F# backend, paced by an
+operator-controlled demo clock.
+
+- Design spec: [`docs/superpowers/specs/2026-07-17-fixithere-demo-prototype-design.md`](docs/superpowers/specs/2026-07-17-fixithere-demo-prototype-design.md)
+- Engineering journal — what broke, what was learned, what was traded off:
+  [`LESSONS-LEARNED.md`](LESSONS-LEARNED.md)
 
 ## Run the backend + demo control panel
 
@@ -28,8 +34,10 @@ primary demo account — `john.reyes@gmail.com` / `Customer1!` — so it is one 
 seeded customers follow the same `first.last@domain` shape
 (`mary.okonkwo@outlook.com`, `steve.lindqvist@icloud.com`,
 `susan.chaudhry@yahoo.ca`, `bob.tremblay@gmail.com`); `GET /customers` lists them all.
-Use the /dev console as the "provider side" to accept/drive jobs, or press
-Start Demo there for the fully scripted flow.
+The provider side is the **Provider app** (below), run on a second simulator —
+the two apps side by side are the demo. The `/dev` console is the operator's
+panel rather than a second actor: it owns the demo clock and can drive a fully
+scripted run (**Start Demo**) when you want the flow to play hands-free.
 
 The console also owns the **demo clock**. The world starts at 2026-01-01 and
 runs at 1x; pause it to talk over a beat, run it at 60x to compress a half-hour
@@ -91,9 +99,13 @@ The GitHub workflow remains manually runnable from the Actions tab.
 
 ## Projects
 
-- `src/Shared` — pure F# domain: types, DTOs, Job state machine
+- `src/Shared` — pure F# domain: types, DTOs, Job state machine, demo clock
 - `src/Backend.Api` — F# Minimal API + EF Core/SQLite + SignalR + `/dev` console
-- `src/Customer.Mobile`, `src/Provider.Mobile` — Fabulous MAUI apps (Plans 2–3, not yet built)
+- `src/ClientShared` — F# both apps link (not a package): HTTP, the SignalR hub
+  client, the Leaflet map page (`MapHtml.fs`), and the shared design tokens
+- `src/Customer.Mobile`, `src/Provider.Mobile` — Fabulous MAUI apps (iOS), the
+  redesigned consumer surface. Both are built; the two running side by side
+  *are* the demo
 
 ## Notes
 
