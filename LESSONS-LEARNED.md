@@ -1335,26 +1335,6 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 ---
 
-### 2026-07-23 — An accepted job is indistinguishable from an unclaimed one
-
-**Current State:** A provider's Home lists their `Scheduled` jobs under "Available jobs". Tapping **Accept** does not change the job's state — the machine's own `Scheduled, Accepted -> Ok Scheduled` is state-preserving by design — and the DTO carries no acceptance marker, so the job reappears in the same list looking untaken. The provider can tap into it and be offered "Accept Job" a second time.
-
-**Limitation:** It reads as the app having ignored the tap. It also leaves a hole in the availability rule shipped in `5f9295d`: a provider goes off-market at **Depart**, not at **Accept**, so between the two they can still accept a second job.
-
-**Ideal Solution:** An acceptance fact on the job — `AcceptedAt: DateTimeOffset option` or an `Accepted` sub-status alongside the reschedule fields — surfaced in the DTO so both apps can distinguish "assigned to me" from "committed to by me". A committed job then renders as its own section, and availability keys on commitment rather than on in-flight.
-
-**Closing this gap requires:**
-1. Column + DTO field + `toJobDto` mapping, set by the `Accepted` transition — ~1 hour — pending
-2. `/dev` console updated for the new DTO field (it is a first-class client — executor note 19) — ~15 min — pending
-3. Provider Home: separate "Accepted — ready to depart" from "Available" — ~30 min — pending
-4. Decide whether `availability` keys on accepted-or-in-flight rather than in-flight, and say so in the copy — ~15 min — pending
-
-**Priority:** Medium — visible on the provider's first screen, but only to someone who accepts and then goes back, which the scripted demo does not do.
-
-**Related:** [Lesson: derive state that another change can invalidate](#2026-07-23--derive-state-that-another-change-can-invalidate-never-store-it)
-
----
-
 ### 2026-07-23 — Seeded jobs are promised ~8 minutes out, so any accelerated run reads as late
 
 **Current State:** The seed places the first upcoming jobs at `Epoch + 8 / 25 / 55` minutes so a countdown is already ticking when the app opens (deliberate — see the demo-clock work). The customer's en-route countdown is reconciled against the *promised* arrival, so it turns red and reads "Late by …" once demo-now passes the promise.
@@ -1649,6 +1629,28 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 
 > Entries moved here when the underlying condition no longer applies.
 > Kept for historical context.
+
+### 2026-07-23 — An accepted job is indistinguishable from an unclaimed one
+
+**Current State:** A provider's Home lists their `Scheduled` jobs under "Available jobs". Tapping **Accept** does not change the job's state — the machine's own `Scheduled, Accepted -> Ok Scheduled` is state-preserving by design — and the DTO carries no acceptance marker, so the job reappears in the same list looking untaken. The provider can tap into it and be offered "Accept Job" a second time.
+
+**Limitation:** It reads as the app having ignored the tap. It also leaves a hole in the availability rule shipped in `5f9295d`: a provider goes off-market at **Depart**, not at **Accept**, so between the two they can still accept a second job.
+
+**Ideal Solution:** An acceptance fact on the job — `AcceptedAt: DateTimeOffset option` or an `Accepted` sub-status alongside the reschedule fields — surfaced in the DTO so both apps can distinguish "assigned to me" from "committed to by me". A committed job then renders as its own section, and availability keys on commitment rather than on in-flight.
+
+**Closing this gap requires:**
+1. Column + DTO field + `toJobDto` mapping, set by the `Accepted` transition — ~1 hour — pending
+2. `/dev` console updated for the new DTO field (it is a first-class client — executor note 19) — ~15 min — pending
+3. Provider Home: separate "Accepted — ready to depart" from "Available" — ~30 min — pending
+4. Decide whether `availability` keys on accepted-or-in-flight rather than in-flight, and say so in the copy — ~15 min — pending
+
+**Priority:** Medium — visible on the provider's first screen, but only to someone who accepts and then goes back, which the scripted demo does not do.
+
+**Related:** [Lesson: derive state that another change can invalidate](#2026-07-23--derive-state-that-another-change-can-invalidate-never-store-it)
+
+**Resolution (2026-07-24) — `1f56baf`, closed.** Shipped as a boolean `IsAccepted` on the Job entity + JobDto (parallel to `IsDemoTracked`; a bool rather than the sketched `AcceptedAt` timestamp, because the pure state machine has no clock and the tell is binary). `JobService` sets it on the `Accepted` event. Provider: an accepted Scheduled job is now the *active* job (leaves "Available", shows "Ready to head out", takes them off the market — so a second job can't be taken). Customer: status flips to "Accepted — your provider will head out soon" via `JobStatus.forCustomerJob`, so the accept visibly crosses. Checklist item 2 (`/dev` console) needed **no** change — the console JS reads JSON and a new field is backward-compatible; verified it still renders. Verified live on two simulators (provider active-job card + paused requests; customer "Accepted" on that job only). Mutation-checked provider test + backend test that Accept sets the flag while the state stays Scheduled. Reasoning retires with the bug; the [derive-not-store lesson](#2026-07-23--derive-state-that-another-change-can-invalidate-never-store-it) it leaned on stays active (availability is still derived — the flag is a *server fact* about the job, not a stored view state).
+
+---
 
 ### 2026-07-23 — The iOS CI job reports success without building anything
 
