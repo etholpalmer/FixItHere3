@@ -127,6 +127,8 @@ let run (db: AppDb) =
           // Seeded jobs populate lists; they are not what the demo drives. True
           // here would march thirty grace windows past on any accelerated run.
           IsDemoTracked = false
+          // Seeded work is unclaimed until a provider taps Accept in-session.
+          IsAccepted = false
           CancelledBy = ""
           Lat = c.Lat; Lng = c.Lng
           Address = c.Address }

@@ -323,6 +323,19 @@ let ``every state has real copy on both sides, and never its own enum name`` () 
             Assert.NotEqual<string>(raw, copy)
 
 [<Fact>]
+let ``the customer sees acceptance, but only while Scheduled`` () =
+    // Accept keeps the state Scheduled, so the customer's status must change on
+    // the IsAccepted flag or the two-app demo can't show the accept crossing.
+    Assert.Equal("Booked — waiting for your provider to head out",
+                 JobStatus.forCustomerJob Scheduled false)
+    Assert.NotEqual<string>(JobStatus.forCustomerJob Scheduled false,
+                            JobStatus.forCustomerJob Scheduled true)
+    Assert.Contains("Accepted", JobStatus.forCustomerJob Scheduled true)
+    // The flag is meaningless once moving — later states ignore it, so the two
+    // agree (no stray "Accepted" leaking onto the EnRoute screen).
+    Assert.Equal(JobStatus.forCustomer EnRoute, JobStatus.forCustomerJob EnRoute true)
+
+[<Fact>]
 let ``state strings round trip, and an unknown one degrades rather than crashes`` () =
     for st in allStates do
         Assert.Equal(Some st, JobStateCodec.tryParse (JobStateCodec.ofState st))

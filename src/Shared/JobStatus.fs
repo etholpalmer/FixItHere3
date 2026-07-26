@@ -53,6 +53,15 @@ module JobStatus =
         | Cancelled -> "This booking was cancelled"
         | ProviderNoShow -> "Your provider never arrived"
 
+    /// `forCustomer`, but able to show that the provider has *accepted* — the one
+    /// distinction the state alone cannot carry, because `Accepted` keeps the
+    /// job `Scheduled`. Without it the customer's screen reads identically before
+    /// and after acceptance, so the two-app demo can't show the accept crossing.
+    let forCustomerJob (state: JobState) (isAccepted: bool) =
+        match state with
+        | Scheduled when isAccepted -> "Accepted — your provider will head out soon"
+        | _ -> forCustomer state
+
     let forProvider =
         function
         | Scheduled -> "Ready to head out"

@@ -32,6 +32,13 @@ type Job =
       /// Seeded jobs are false: they exist to populate lists, and letting the
       /// demo clock march over their grace windows fires a no-show storm.
       IsDemoTracked: bool
+      /// The provider has taken the job. `Accepted` keeps the state `Scheduled`
+      /// (assignment, not a state change — see StateMachine), so without this
+      /// flag an accepted job is indistinguishable from an unclaimed one: it
+      /// sits in the provider's "Available jobs" looking untaken and a second
+      /// job can be accepted before the first departs. Meaningful only while
+      /// Scheduled; later states never read it.
+      IsAccepted: bool
       /// "" | "Customer" | "Provider". `Cancelled` on its own says a job did
       /// not happen but not whose decision that was — which is the difference
       /// between a customer changing their mind and a provider dropping the

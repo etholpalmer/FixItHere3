@@ -49,10 +49,10 @@ let private urgencyColor (u: Urgency) =
     | Urgency.Soon -> Theme.calm
     | Urgency.Calm -> Theme.inkMuted
 
-let private statusLine (state: string) (cancelledBy: string) =
+let private statusLine (state: string) (cancelledBy: string) (isAccepted: bool) =
     match JobStateCodec.tryParse state with
     | Some Cancelled -> JobStatus.cancelledBy ActorRole.Customer (ActorRole.ofWire cancelledBy)
-    | Some s -> JobStatus.forCustomer s
+    | Some s -> JobStatus.forCustomerJob s isAccepted
     | None -> "Checking status…"
 
 /// The status card: who, what, and the one number this whole screen exists
@@ -66,7 +66,7 @@ let private statusCard (model: Model) (job: FixItHere.Shared.Dtos.JobDto) (etaLi
                 .textColor(Theme.brand)
                 .width(Theme.touchTarget).height(Theme.touchTarget)
 
-            Label(statusLine job.State job.CancelledBy)
+            Label(statusLine job.State job.CancelledBy job.IsAccepted)
                 .font(size = Theme.Font.title3, attributes = FontAttributes.Bold)
                 .textColor(Theme.ink)
 

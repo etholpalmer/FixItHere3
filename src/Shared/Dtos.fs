@@ -64,6 +64,11 @@ type JobDto =
       /// fixed start times, so any accelerated run marches demo-now past all
       /// thirty grace windows and fires thirty no-show notifications in a row.
       IsDemoTracked: bool
+      /// The provider has accepted this job. Since `Accepted` leaves the state
+      /// `Scheduled`, this is the only thing that tells an accepted job apart
+      /// from an unclaimed one — the provider list uses it to move accepted
+      /// work out of "Available" and to stop a second job being taken.
+      IsAccepted: bool
       /// Who cancelled: "" | "Customer" | "Provider". Empty unless State is
       /// Cancelled.
       CancelledBy: string

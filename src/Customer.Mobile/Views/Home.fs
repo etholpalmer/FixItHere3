@@ -11,9 +11,9 @@ open FixItHere.Shared
 let private nonTerminal (j: FixItHere.Shared.Dtos.JobDto) =
     j.State <> "Closed" && j.State <> "Cancelled"
 
-let private statusOf (state: string) =
-    JobStateCodec.tryParse state
-    |> Option.map JobStatus.forCustomer
+let private statusOf (j: FixItHere.Shared.Dtos.JobDto) =
+    JobStateCodec.tryParse j.State
+    |> Option.map (fun st -> JobStatus.forCustomerJob st j.IsAccepted)
     |> Option.defaultValue "Checking status…"
 
 /// Urgency drives colour. A deadline that has passed must not look like one
@@ -115,10 +115,10 @@ let view (model: Model) =
                 | Some c ->
                     jobRow (Navigate (Tracking j.Id))
                         title
-                        (sprintf "%s · %s %s" (statusOf j.State) c.Label c.Value)
+                        (sprintf "%s · %s %s" (statusOf j) c.Label c.Value)
                         (urgencyColor c.Urgency)
                 | None ->
-                    jobRow (Navigate (Tracking j.Id)) title (statusOf j.State) Theme.inkMuted
+                    jobRow (Navigate (Tracking j.Id)) title (statusOf j) Theme.inkMuted
 
         // Quiet, at the foot of the screen: an About page a real product has,
         // carrying the sample-photo credits.

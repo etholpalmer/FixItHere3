@@ -300,18 +300,23 @@ module Domain =
             Countdown.forProvider state (rescheduleOf j) km m.DemoNow)
 
 
-    /// The single job currently being worked (spec: one Active Job at a time).
+    /// The single job this provider is committed to right now (spec: one Active
+    /// Job at a time).
     ///
-    /// The in-flight set lives in Shared and is exhaustive over JobState, so a
-    /// new state cannot silently fall outside it. The old string list would
-    /// have quietly dropped any new in-flight state out of `activeJob` — and
-    /// pinned any new *terminal* one there forever.
+    /// Committed means either *in flight* (driving to or working the job) or
+    /// *accepted but not yet departed*. The second case is why `IsAccepted`
+    /// exists: `Accepted` leaves the state `Scheduled`, so without the flag an
+    /// accepted job would sit in "Available jobs" looking untaken and a second
+    /// job could be accepted before this one departs. The in-flight set lives in
+    /// Shared and is exhaustive over JobState, so a new state cannot silently
+    /// fall outside it.
     let activeJob (m: Model) : JobDto option =
         m.Jobs
         |> List.tryFind (fun j ->
-            JobStateCodec.tryParse j.State
-            |> Option.map JobStatus.isInFlight
-            |> Option.defaultValue false)
+            match JobStateCodec.tryParse j.State with
+            | Some st when JobStatus.isInFlight st -> true
+            | Some Scheduled -> j.IsAccepted
+            | Some _ | None -> false)
 
     /// The one rule for whether this provider can be offered work.
     ///

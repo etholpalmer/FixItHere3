@@ -25,7 +25,7 @@ let mkJob id state : JobDto =
       ServiceId = 7; ServiceName = "HVAC"; State = state; Price = 85m
       ScheduledFor = "Now"; PromisedStart = "Now"
       ProposedStart = ""; ProposedBy = ""
-      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; CancelledBy = ""
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; IsAccepted = false; CancelledBy = ""
       Lat = 43.70; Lng = -79.40; Address = "1 Demo St" }
 
 [<Fact>]
@@ -56,6 +56,21 @@ let ``a job in flight takes the provider off the market`` () =
     // stored. Completed is not in flight, so this needs no extra bookkeeping.
     Assert.Equal(Availability.Available, availability { onShift with Jobs = [mkJob 1 "Completed"] })
     Assert.Equal(Availability.Available, availability { onShift with Jobs = [mkJob 1 "Closed"] })
+
+[<Fact>]
+let ``an accepted job is mine: off the market, out of Available, still Scheduled`` () =
+    // The Tier-1 tell: Accept keeps the state Scheduled, so without IsAccepted an
+    // accepted job looked unclaimed and a second could be taken. It is now the
+    // active job and takes the provider off the market.
+    let onShift = { Model.initial with Online = true }
+    let unclaimed = mkJob 1 "Scheduled"                       // IsAccepted = false
+    let mine = { unclaimed with IsAccepted = true }
+    // Unaccepted: on the market, not the active job.
+    Assert.Equal(None, activeJob { onShift with Jobs = [unclaimed] } |> Option.map (fun j -> j.Id))
+    Assert.Equal(Availability.Available, availability { onShift with Jobs = [unclaimed] })
+    // Accepted: it IS the active job, and the provider is OnAJob (can't take a second).
+    Assert.Equal(Some 1, activeJob { onShift with Jobs = [mine] } |> Option.map (fun j -> j.Id))
+    Assert.Equal(Availability.OnAJob, availability { onShift with Jobs = [mine] })
 
 [<Fact>]
 let ``on a job outranks off shift`` () =

@@ -24,6 +24,19 @@ let ``valid transition persists new state`` () =
     Assert.Equal("EnRoute", db.Jobs.Single(fun j -> j.Id = job.Id).State)
 
 [<Fact>]
+let ``accepting sets IsAccepted while leaving the state Scheduled`` () =
+    let svc, db, conn = setup ()
+    use _ = conn
+    let job = db.Jobs.First(fun j -> j.State = "Scheduled")
+    Assert.False(job.IsAccepted)                       // seeded work is unclaimed
+    match (svc.Apply job.Id Accepted).Result with
+    | Ok dto ->
+        Assert.Equal("Scheduled", dto.State)           // assignment, not a state change
+        Assert.True(dto.IsAccepted)                    // …but the DTO now carries the marker
+    | Error e -> failwith e
+    Assert.True(db.Jobs.Single(fun j -> j.Id = job.Id).IsAccepted)  // and it persisted
+
+[<Fact>]
 let ``invalid transition returns Error and does not persist`` () =
     let svc, db, conn = setup ()
     use _ = conn

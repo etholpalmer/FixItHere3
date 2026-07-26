@@ -102,6 +102,7 @@ let toJobDto (db: AppDb) (j: Job) : JobDto =
       ProposedStart = j.ProposedStart; ProposedBy = j.ProposedBy
       ProposalReason = j.ProposalReason; ProposalExpiresAt = j.ProposalExpiresAt
       IsDemoTracked = j.IsDemoTracked
+      IsAccepted = j.IsAccepted
       CancelledBy = j.CancelledBy
       Lat = j.Lat; Lng = j.Lng; Address = j.Address }
 
@@ -130,6 +131,9 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                     let withActor =
                         match event, by with
                         | Cancel, Some role -> { settled with CancelledBy = ActorRole.toWire role }
+                        // Assignment, recorded. The state stays Scheduled, so this
+                        // flag is the only trace that the job is now taken.
+                        | Accepted, _ -> { settled with IsAccepted = true }
                         | _ -> settled
                     let updated = { withActor with State = JobStateCodec.ofState next }
                     db.Entry(job).CurrentValues.SetValues(updated)
@@ -198,6 +202,8 @@ type JobService(db: AppDb, hub: IBroadcaster) =
                   ProposalReason = ""; ProposalExpiresAt = ""
                   // Booked in-session, so this one *is* the demo.
                   IsDemoTracked = true
+                  // Just booked; no provider has taken it yet.
+                  IsAccepted = false
                   CancelledBy = ""
                   Lat = resolvedLat; Lng = resolvedLng; Address = resolvedAddress }
             ignore prov

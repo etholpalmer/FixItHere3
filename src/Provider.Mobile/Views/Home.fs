@@ -205,9 +205,12 @@ let view (model: Model) =
                 .textColor(Theme.ink)
                 .padding(Thickness(0., Theme.Space.sm, 0., 0.))
 
+            // Scheduled AND not yet mine. An accepted job is still Scheduled,
+            // but it has left the market — it shows above as the active job,
+            // ready to depart — so it must not reappear here looking untaken.
             let available =
                 model.Jobs
-                |> List.filter (fun j -> j.State = "Scheduled")
+                |> List.filter (fun j -> j.State = "Scheduled" && not j.IsAccepted)
                 |> List.sortBy (fun j -> j.PromisedStart)
 
             if List.isEmpty available then
@@ -231,7 +234,7 @@ let view (model: Model) =
                 .font(size = Theme.Font.headline, attributes = FontAttributes.Bold)
                 .textColor(Theme.ink)
                 .padding(Thickness(0., Theme.Space.sm, 0., 0.))
-            Label("You're on a job. Mark it complete and the next requests come straight back.")
+            Label("You're on a job. Finish it and the next requests come straight back.")
                 .font(size = Theme.Font.subhead)
                 .textColor(Theme.inkMuted)
 

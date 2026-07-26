@@ -54,7 +54,7 @@ let private stubJob : JobDto =
       ServiceId = 1; ServiceName = "Plumbing"; State = "Scheduled"; Price = 85m
       ScheduledFor = "Now"; PromisedStart = "Now"
       ProposedStart = ""; ProposedBy = ""
-      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; CancelledBy = ""
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; IsAccepted = false; CancelledBy = ""
       Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
 let stubDeps : ApiDeps =
@@ -89,7 +89,7 @@ let mkJob id state : JobDto =
       ServiceId = 3; ServiceName = "Plumbing"; State = state; Price = 85m
       ScheduledFor = "Now"; PromisedStart = "Now"
       ProposedStart = ""; ProposedBy = ""
-      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; CancelledBy = ""
+      ProposalReason = ""; ProposalExpiresAt = ""; IsDemoTracked = true; IsAccepted = false; CancelledBy = ""
       Lat = 43.65; Lng = -79.38; Address = "1 Demo St" }
 
 let up msg model = Update.update stubDeps msg model |> fst
