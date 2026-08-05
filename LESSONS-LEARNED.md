@@ -10,7 +10,7 @@
 - **SDK:** .NET 10.0.302 (single SDK installed; no MAUI workload installed as of this writing)
 - **Key Tools:** F# 9 (ships with .NET 10 SDK), EF Core 10.0.10, xUnit 2.9.3, FsCheck.Xunit 2.16.6 (pinned), SignalR, SQLite, MAUI workload 10.0.20/10.0.100 (installed mid-project; see Archive)
 - **CI:** GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — tests on ubuntu-latest, advisory Mac Catalyst build on macos-latest
-- **Last Updated:** 2026-07-24 (all 19 plan tasks complete; Tier-1 accepted-job marker shipped. Latest post-plan fixes from live use: two-tap confirm on the provider's progress actions, and Arrived gated on being at the customer — the app now tracks its own position, which the map-side channel had been hiding. One-command demo spin-up (scripts/demo-up.sh). CI local-only via pre-push gate)
+- **Last Updated:** 2026-07-24 (all 19 plan tasks complete; Tier-1 accepted-job marker shipped. Latest post-plan fixes from live use: two-tap confirm on the provider's progress actions, and Arrived gated on being at the customer — the app now tracks its own position, which the map-side channel had been hiding. One-command demo spin-up (scripts/demo-up.sh). CI local-only via pre-push gate. Disk reclaim: simulators are the ~18GB hog, not build artifacts)
 
 ---
 
@@ -70,6 +70,18 @@ The last row is the important nuance, not a footnote: the no-show bug was *fixab
 **Active mitigation:** `atJobLocation` in [Provider Domain.fs](src/Provider.Mobile/Domain.fs) plus its tests — the model-side position is now asserted, not just drawn.
 
 **Related:** [Mistake: Arrived could be tapped from across town](#2026-07-24--arrived-could-be-marked-from-across-town); [Memoised the map's HTML string but rebuilt its source object every render](#2026-07-22--memoised-the-maps-html-string-but-rebuilt-its-source-object-every-render); [The map never tracked live…](#2026-07-23--the-map-never-tracked-live-signalr-credentials-and-a-casing-mismatch)
+
+---
+
+### 2026-07-24 — On APFS, freed disk shows in `du` instantly but in `df` on a delay — don't chase phantom snapshots
+
+**Insight:** After `xcrun simctl erase all`, `du` on the simulator devices dir dropped **18 GB → 577 MB** immediately, but `df` free space barely moved (8.5 → 9.4 GiB). The reflex — "a snapshot must be pinning the deleted blocks" — was wrong. APFS reclaims deleted space **asynchronously**; over the next minute or two `df` climbed on its own (9.4 → 13 → 18 → 27 GiB) with no intervention. `du` measures what the tree references now; `df` reflects what the container has actually reclaimed, and the two diverge right after a large delete.
+
+**Discovery:** Nearly reached for `tmutil thinlocalsnapshots /` (which needs `sudo`) to "free" space a lone `(dataless)` Time Machine local snapshot appeared to be holding — but the snapshot was dataless (holds ~nothing), and simply **re-measuring** showed the space returning on its own.
+
+**Impact:** The rule when reclaiming disk on macOS: trust `du` for "are the files actually gone", and **wait and re-measure `df`** before concluding something is pinning space. Reach for `tmutil` / snapshot deletion only if `df` is still short *minutes* later and `tmutil listlocalsnapshots /` shows a non-dataless snapshot. A dataless snapshot is not your problem. Corollary: don't prompt for `sudo` to solve a problem that resolves itself.
+
+**Related:** [Gap: no disk-headroom check…](#2026-07-18--no-disk-headroom-check-beforeduring-long-maui-build-heavy-agentic-sessions)
 
 ---
 
@@ -1468,6 +1480,11 @@ The investor lens found that **"Developer Settings" is a button on both apps' Ho
 3. Optionally, prune `~/.nuget/packages` on a schedule independent of this repo, since it's a machine-wide cache that isn't specific to this project — pending, outside this repo's control
 
 **Active mitigation:** None yet — the fastest interim step is simply running `df -h /` manually before kicking off a build-heavy task batch in this project.
+
+**Updated 2026-07-24 — the dominant hog is the iOS Simulators, not build artifacts.** A disk squeeze this session (down to 9.5 GiB free) was measured, and the breakdown was lopsided: **`~/Library/Developer/CoreSimulator/Devices` = 18 GB** across ~34 devices (six held ~3 GB each of installed apps + data + logs), while the repo's `bin`/`obj` totalled only **~1 GB** and DerivedData / sim caches were empty. So the recommended-improvement above (which focused on bin/obj and the nuget cache) aimed at the wrong ~1 GB. Two reclaim commands, in order of yield:
+- `xcrun simctl shutdown all && xcrun simctl erase all` — wipes every simulator's contents but keeps the device definitions (freed ~17 GB; `demo-up.sh` rebuilds+installs the apps next run). `xcrun simctl delete unavailable` additionally drops devices for uninstalled runtimes.
+- `find . -type d \( -name bin -o -name obj \) -prune -exec rm -rf {} +` — reclaims the ~1 GB of build artifacts. **`dotnet clean` is the wrong tool here:** against the `.slnx` it evaluates the android/iOS TFMs (needs the maui workload, same reason we never `dotnet test` the solution) and still leaves parts of `obj`; `rm -rf` is complete and instant, and the pre-push gate rebuilds on demand.
+- After deleting, expect `df` to lag — see [the APFS reclaim lesson](#2026-07-24--on-apfs-freed-disk-shows-in-du-instantly-but-in-df-on-a-delay--dont-chase-phantom-snapshots).
 
 **Priority:** Medium — didn't block correctness of any shipped code, but did block the agent's own ability to finish verifying Task 12 within this session (see the related Compromise/Gap on Task 12's incomplete final verification).
 
